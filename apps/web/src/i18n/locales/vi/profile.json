@@ -178,6 +178,34 @@
 				"confirm": "Tạo",
 				"doneTitle": "Mã khôi phục mới của bạn"
 			}
+		},
+		"passkeys": {
+			"title": "Khóa truy cập",
+			"description": "Đăng nhập bằng vân tay, khuôn mặt, khóa màn hình hoặc khóa bảo mật làm bước thứ hai thay cho mã.",
+			"add": "Thêm khóa truy cập",
+			"unsupported": "Trình duyệt này không hỗ trợ khóa truy cập.",
+			"empty": "Bạn chưa thêm khóa truy cập nào.",
+			"added": "Thêm ngày {{date}}",
+			"lastUsed": "Dùng lần cuối: {{date}}",
+			"neverUsed": "Chưa dùng",
+			"removeLabel": "Xóa {{name}}",
+			"defaultName": "Khóa truy cập",
+			"addTitle": "Thêm khóa truy cập",
+			"addDescription": "Đặt một tên dễ nhớ, rồi làm theo hướng dẫn của trình duyệt.",
+			"nameLabel": "Tên",
+			"namePlaceholder": "ví dụ: Laptop công ty",
+			"continue": "Tiếp tục",
+			"removeTitle": "Xóa khóa truy cập",
+			"removeDescription": "\"{{name}}\" sẽ không còn dùng để đăng nhập được nữa. Bạn sẽ được yêu cầu xác nhận bằng một trong các khóa truy cập của mình.",
+			"remove": "Xóa",
+			"errors": {
+				"load": "Không thể tải các khóa truy cập của bạn.",
+				"cancelled": "Yêu cầu khóa truy cập đã bị hủy hoặc hết thời gian.",
+				"alreadyRegistered": "Thiết bị hoặc khóa này đã được đăng ký làm khóa truy cập.",
+				"limit": "Bạn đã đạt số khóa truy cập tối đa. Hãy xóa một khóa trước.",
+				"invalid": "Không thể xác minh khóa truy cập. Vui lòng thử lại.",
+				"generic": "Đã xảy ra lỗi. Vui lòng thử lại."
+			}
 		}
 	}
 }

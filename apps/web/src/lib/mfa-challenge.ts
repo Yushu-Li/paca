@@ -1,3 +1,5 @@
+import type { MfaMethod } from "./auth-api";
+
 /**
  * The MFA challenge a password sign-in returned, kept for the code-entry page.
  * sessionStorage (this tab only, gone when it closes) rather than the URL, so
@@ -9,6 +11,8 @@ const KEY = "paca.mfa-challenge";
 
 export interface PendingMfa {
 	challenge: string;
+	/** Second factors the account can use; absent means a code only. */
+	methods?: MfaMethod[];
 	/** Same-origin path to open once signed in, if the user was sent here from one. */
 	redirectTo?: string;
 }
@@ -27,7 +31,11 @@ export function loadPendingMfa(): PendingMfa | null {
 		if (!raw) return null;
 		const parsed = JSON.parse(raw) as Partial<PendingMfa>;
 		return typeof parsed.challenge === "string" && parsed.challenge
-			? { challenge: parsed.challenge, redirectTo: parsed.redirectTo }
+			? {
+					challenge: parsed.challenge,
+					methods: parsed.methods,
+					redirectTo: parsed.redirectTo,
+				}
 			: null;
 	} catch {
 		return null;

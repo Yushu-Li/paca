@@ -178,6 +178,34 @@
 				"confirm": "Generar",
 				"doneTitle": "Tus nuevos códigos de recuperación"
 			}
+		},
+		"passkeys": {
+			"title": "Llaves de acceso",
+			"description": "Inicia sesión con tu huella, tu rostro, el bloqueo de pantalla o una llave de seguridad como segundo paso, en lugar de un código.",
+			"add": "Añadir una llave de acceso",
+			"unsupported": "Este navegador no admite llaves de acceso.",
+			"empty": "Todavía no has añadido ninguna llave de acceso.",
+			"added": "Añadida el {{date}}",
+			"lastUsed": "Último uso: {{date}}",
+			"neverUsed": "Nunca usada",
+			"removeLabel": "Eliminar {{name}}",
+			"defaultName": "Llave de acceso",
+			"addTitle": "Añadir una llave de acceso",
+			"addDescription": "Ponle un nombre que reconozcas y sigue las indicaciones del navegador.",
+			"nameLabel": "Nombre",
+			"namePlaceholder": "p. ej., Portátil del trabajo",
+			"continue": "Continuar",
+			"removeTitle": "Eliminar llave de acceso",
+			"removeDescription": "«{{name}}» dejará de servir para iniciar sesión. Se te pedirá confirmar con una de tus llaves de acceso.",
+			"remove": "Eliminar",
+			"errors": {
+				"load": "No se pudieron cargar tus llaves de acceso.",
+				"cancelled": "La solicitud de la llave de acceso se canceló o caducó.",
+				"alreadyRegistered": "Este dispositivo o llave ya está registrado como llave de acceso.",
+				"limit": "Has alcanzado el número máximo de llaves de acceso. Elimina una primero.",
+				"invalid": "No se pudo verificar la llave de acceso. Inténtalo de nuevo.",
+				"generic": "Algo salió mal. Inténtalo de nuevo."
+			}
 		}
 	}
 }

@@ -178,6 +178,34 @@
 				"confirm": "生成",
 				"doneTitle": "你的新恢复码"
 			}
+		},
+		"passkeys": {
+			"title": "通行密钥",
+			"description": "使用指纹、面容、屏幕锁或安全密钥作为第二步验证登录，无需输入验证码。",
+			"add": "添加通行密钥",
+			"unsupported": "此浏览器不支持通行密钥。",
+			"empty": "你还没有添加通行密钥。",
+			"added": "添加于 {{date}}",
+			"lastUsed": "上次使用：{{date}}",
+			"neverUsed": "从未使用",
+			"removeLabel": "删除 {{name}}",
+			"defaultName": "通行密钥",
+			"addTitle": "添加通行密钥",
+			"addDescription": "为它起一个便于识别的名称，然后按照浏览器提示操作。",
+			"nameLabel": "名称",
+			"namePlaceholder": "例如：工作笔记本",
+			"continue": "继续",
+			"removeTitle": "删除通行密钥",
+			"removeDescription": "“{{name}}”将无法再用于登录。系统会要求你使用其中一个通行密钥进行确认。",
+			"remove": "删除",
+			"errors": {
+				"load": "无法加载你的通行密钥。",
+				"cancelled": "通行密钥验证已取消或已超时。",
+				"alreadyRegistered": "此设备或密钥已注册为通行密钥。",
+				"limit": "已达到通行密钥数量上限，请先删除一个。",
+				"invalid": "无法验证通行密钥，请重试。",
+				"generic": "出了点问题，请重试。"
+			}
 		}
 	}
 }

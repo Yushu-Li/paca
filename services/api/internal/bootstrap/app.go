@@ -252,6 +252,15 @@ func New(cfg *config.Config) (*App, error) {
 	// no enrollments, CIDRs or policy configured (the default) it is a no-op.
 	// TOTP enrollment needs the encryptor; without it only the allow-lists work.
 	mfaService := mfasvc.New(pgRepo.NewMFARepository(db), encryptor, "Paca")
+	// Passkeys need a relying-party identity, taken from PUBLIC_URL; without
+	// one they stay off and accounts keep using TOTP.
+	if rp, ok := mfasvc.RelyingPartyFromURL(cfg.Server.PublicURL, cfg.Server.PasskeyRPID, "Paca"); ok {
+		if _, err := mfaService.WithPasskeys(pgRepo.NewPasskeyRepository(db), redisRepo.NewCeremonyStore(redisClient), rp); err != nil {
+			log.Warn("passkeys disabled: invalid relying-party config", "error", err)
+		}
+	} else {
+		log.Warn("PUBLIC_URL not set or invalid: passkeys are disabled")
+	}
 	authService.WithLoginGate(mfaService)
 	// Wrong-password lockout per username: 10 failures within 15 minutes lock
 	// that name for 15 minutes. Held in Redis, so it covers every API instance.
@@ -534,7 +543,7 @@ func New(cfg *config.Config) (*App, error) {
 		RefreshSessionTTL: cfg.JWT.RefreshSessionTTL,
 	}
 
-	authHandler := handler.NewAuthHandler(authService, cookieCfg)
+	authHandler := handler.NewAuthHandler(authService, cookieCfg).WithPasskeyLogin(authService)
 	deps := router.Deps{
 		TokenManager:        tokenManager,
 		APIKeyAuth:          apiKeyService,

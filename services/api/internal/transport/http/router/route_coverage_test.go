@@ -143,12 +143,24 @@ var mfaOpenRoutes = []string{
 	// policy can require MFA before the account is able to sign in.
 	"POST /api/v1/auth/mfa/setup",
 	"POST /api/v1/auth/mfa/setup/confirm",
+	"POST /api/v1/auth/mfa/setup/passkey/options",
+	"POST /api/v1/auth/mfa/setup/passkey/finish",
 	// Self-service on the caller's own account, like the other /users/me routes.
 	"GET /api/v1/users/me/mfa",
 	"POST /api/v1/users/me/mfa/enroll",
 	"POST /api/v1/users/me/mfa/confirm",
 	"POST /api/v1/users/me/mfa/disable",
 	"POST /api/v1/users/me/mfa/recovery-codes",
+	// Passkey login, the twin of POST /auth/mfa/verify: the request carries
+	// the login challenge token and the authenticator's signed assertion.
+	"POST /api/v1/auth/mfa/passkey/options",
+	"POST /api/v1/auth/mfa/passkey/verify",
+	// Passkey self-service on the caller's own account, like /users/me/mfa.
+	"GET /api/v1/users/me/passkeys",
+	"POST /api/v1/users/me/passkeys/register/options",
+	"POST /api/v1/users/me/passkeys/register/finish",
+	"POST /api/v1/users/me/passkeys/verify/options",
+	"DELETE /api/v1/users/me/passkeys/{passkeyId}",
 }
 
 // gatesOf returns the guards gates among a route's middlewares.

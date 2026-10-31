@@ -1,3 +1,7 @@
+import {
+	type PublicKeyCredentialRequestOptionsJSON,
+	startAuthentication,
+} from "@simplewebauthn/browser";
 import { queryOptions } from "@tanstack/react-query";
 import axios from "axios";
 
@@ -45,25 +49,44 @@ export async function setPasswordWithToken(
 	});
 }
 
+/** A second factor the account can answer a sign-in challenge with. */
+export type MfaMethod = "totp" | "passkey";
+
+/** A password sign-in that still owes a second factor. */
+export interface MfaChallenge {
+	challenge: string;
+	methods: MfaMethod[];
+}
+
 /**
  * Resolves to `null` once signed in (the session cookies are set). Resolves
- * to a challenge token instead when the password was right but the account
- * has two-step verification: no session exists yet, and the token goes to
- * `verifyMfaLogin` together with a code.
+ * to a challenge instead when the password was right but the account has
+ * two-step verification: no session exists yet, and the token goes to
+ * `verifyMfaLogin` (with a code) or `verifyPasskeyLogin`.
  */
 export async function login(
 	username: string,
 	password: string,
 	rememberMe: boolean,
-): Promise<string | null> {
+): Promise<MfaChallenge | null> {
 	const { data } = await apiClient.instance.post<
-		SuccessEnvelope<{ mfa_required?: boolean; mfa_challenge?: string }>
+		SuccessEnvelope<{
+			mfa_required?: boolean;
+			mfa_challenge?: string;
+			mfa_methods?: MfaMethod[] | null;
+		}>
 	>("/auth/login", {
 		username,
 		password,
 		remember_me: rememberMe,
 	});
-	return data?.data?.mfa_required ? (data.data.mfa_challenge ?? null) : null;
+	const body = data?.data;
+	if (!body?.mfa_required || !body.mfa_challenge) return null;
+	// A server that predates passkeys sends no list: it only ever meant a code.
+	return {
+		challenge: body.mfa_challenge,
+		methods: body.mfa_methods?.length ? body.mfa_methods : ["totp"],
+	};
 }
 
 /** Second step of a sign-in that answered with an MFA challenge. */
@@ -72,6 +95,25 @@ export async function verifyMfaLogin(
 	code: string,
 ): Promise<void> {
 	await apiClient.instance.post("/auth/mfa/verify", { challenge, code });
+}
+
+/** Second step of a sign-in with a passkey: asks the server for a WebAuthn
+ * request, has the browser sign it (the OS prompt), and exchanges the result
+ * for the session. Rejects with the browser's own error if the user
+ * dismisses the prompt. */
+export async function verifyPasskeyLogin(challenge: string): Promise<void> {
+	const { data } = await apiClient.instance.post<
+		SuccessEnvelope<{
+			options: { publicKey: PublicKeyCredentialRequestOptionsJSON };
+		}>
+	>("/auth/mfa/passkey/options", { challenge });
+	const credential = await startAuthentication({
+		optionsJSON: data.data.options.publicKey,
+	});
+	await apiClient.instance.post("/auth/mfa/passkey/verify", {
+		challenge,
+		credential,
+	});
 }
 
 export async function logout(): Promise<void> {

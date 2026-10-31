@@ -20,6 +20,8 @@ export const ApiErrorCode = {
 	IpNotAllowed: "AUTH_IP_NOT_ALLOWED",
 	MfaAlreadyEnabled: "MFA_ALREADY_ENABLED",
 	MfaUnavailable: "MFA_UNAVAILABLE",
+	PasskeyInvalid: "PASSKEY_INVALID",
+	PasskeyLimit: "PASSKEY_LIMIT",
 	InvalidCidr: "INVALID_CIDR",
 	SelfLockout: "SELF_LOCKOUT",
 

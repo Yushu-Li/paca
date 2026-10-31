@@ -178,6 +178,34 @@
 				"confirm": "Gerar",
 				"doneTitle": "Seus novos códigos de recuperação"
 			}
+		},
+		"passkeys": {
+			"title": "Chaves de acesso",
+			"description": "Entre com sua digital, rosto, bloqueio de tela ou uma chave de segurança como segunda etapa, em vez de um código.",
+			"add": "Adicionar chave de acesso",
+			"unsupported": "Este navegador não oferece suporte a chaves de acesso.",
+			"empty": "Você ainda não adicionou nenhuma chave de acesso.",
+			"added": "Adicionada em {{date}}",
+			"lastUsed": "Último uso: {{date}}",
+			"neverUsed": "Nunca usada",
+			"removeLabel": "Remover {{name}}",
+			"defaultName": "Chave de acesso",
+			"addTitle": "Adicionar chave de acesso",
+			"addDescription": "Dê um nome que você reconheça e siga as instruções do navegador.",
+			"nameLabel": "Nome",
+			"namePlaceholder": "ex.: Notebook do trabalho",
+			"continue": "Continuar",
+			"removeTitle": "Remover chave de acesso",
+			"removeDescription": "\"{{name}}\" não poderá mais ser usada para entrar. Você precisará confirmar com uma das suas chaves de acesso.",
+			"remove": "Remover",
+			"errors": {
+				"load": "Não foi possível carregar suas chaves de acesso.",
+				"cancelled": "A solicitação da chave de acesso foi cancelada ou expirou.",
+				"alreadyRegistered": "Este dispositivo ou chave já está registrado como chave de acesso.",
+				"limit": "Você atingiu o número máximo de chaves de acesso. Remova uma primeiro.",
+				"invalid": "Não foi possível verificar a chave de acesso. Tente novamente.",
+				"generic": "Algo deu errado. Tente novamente."
+			}
 		}
 	}
 }

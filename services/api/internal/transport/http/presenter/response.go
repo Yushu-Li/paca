@@ -174,6 +174,14 @@ func statusAndCodeFor(err error) (int, apierr.Code) {
 		return http.StatusConflict, apierr.CodeMFANotEnabled
 	case errors.Is(err, mfadom.ErrUnavailable):
 		return http.StatusServiceUnavailable, apierr.CodeMFAUnavailable
+	case errors.Is(err, mfadom.ErrPasskeyUnavailable):
+		return http.StatusServiceUnavailable, apierr.CodeMFAUnavailable
+	case errors.Is(err, mfadom.ErrPasskeyInvalid):
+		return http.StatusBadRequest, apierr.CodePasskeyInvalid
+	case errors.Is(err, mfadom.ErrPasskeyLimit):
+		return http.StatusConflict, apierr.CodePasskeyLimit
+	case errors.Is(err, mfadom.ErrPasskeyNotFound):
+		return http.StatusNotFound, apierr.CodePasskeyNotFound
 	case errors.Is(err, mfadom.ErrInvalidCIDR):
 		return http.StatusBadRequest, apierr.CodeInvalidCIDR
 	case errors.Is(err, domainauth.ErrTokenInvalid):

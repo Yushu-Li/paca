@@ -180,6 +180,7 @@ func Load() (*Config, error) {
 			Port:               env("PORT", "8080"),
 			CookieSecure:       cookieSecure,
 			PublicURL:          env("PUBLIC_URL", ""),
+			PasskeyRPID:        env("PASSKEY_RP_ID", ""),
 			CORSAllowedOrigins: parseCORSOrigins(env("CORS_ORIGINS", "*")),
 			AuthRateLimit:      authRateLimit,
 			TrustedProxyHops:   proxyHops,

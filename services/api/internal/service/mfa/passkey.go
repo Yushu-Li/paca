@@ -1,0 +1,331 @@
+package mfasvc
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"net/url"
+	"strings"
+	"time"
+
+	"github.com/go-webauthn/webauthn/protocol"
+	"github.com/go-webauthn/webauthn/webauthn"
+	"github.com/google/uuid"
+
+	mfadom "github.com/Paca-AI/api/internal/domain/mfa"
+	userdom "github.com/Paca-AI/api/internal/domain/user"
+)
+
+const (
+	// ceremonyTTL is how long a browser has to answer a passkey prompt.
+	ceremonyTTL     = 5 * time.Minute
+	maxPasskeyName  = 64
+	maxPasskeyCount = 20
+)
+
+// waUser adapts an account and its passkeys to webauthn.User.
+type waUser struct {
+	u     *userdom.User
+	creds []webauthn.Credential
+}
+
+func (w waUser) WebAuthnID() []byte                         { return w.u.ID[:] }
+func (w waUser) WebAuthnName() string                       { return w.u.Username }
+func (w waUser) WebAuthnDisplayName() string                { return w.u.Username }
+func (w waUser) WebAuthnCredentials() []webauthn.Credential { return w.creds }
+
+// RelyingParty identifies this deployment to authenticators. A passkey is
+// bound to RPID, so changing it orphans every registered passkey.
+type RelyingParty struct {
+	ID      string
+	Name    string
+	Origins []string
+}
+
+// RelyingPartyFromURL derives the relying party from the deployment's public
+// URL: the host is the RP ID and the URL's origin the only accepted origin.
+// rpID, when set, overrides the host (a registrable parent domain, to share
+// passkeys across subdomains). An empty publicURL returns false.
+func RelyingPartyFromURL(publicURL, rpID, name string) (RelyingParty, bool) {
+	u, err := url.Parse(strings.TrimSpace(publicURL))
+	if err != nil || u.Scheme == "" || u.Hostname() == "" {
+		return RelyingParty{}, false
+	}
+	if rpID == "" {
+		rpID = u.Hostname()
+	}
+	return RelyingParty{ID: rpID, Name: name, Origins: []string{u.Scheme + "://" + u.Host}}, true
+}
+
+// WithPasskeys enables WebAuthn passkeys as a second factor. Without it the
+// passkey methods return ErrPasskeyUnavailable and accounts can only use TOTP.
+func (s *Service) WithPasskeys(store mfadom.PasskeyStore, ceremonies mfadom.CeremonyStore, rp RelyingParty) (*Service, error) {
+	wa, err := webauthn.New(&webauthn.Config{
+		RPID:          rp.ID,
+		RPDisplayName: rp.Name,
+		RPOrigins:     rp.Origins,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("mfa: webauthn config: %w", err)
+	}
+	s.passkeys, s.ceremonies, s.wa = store, ceremonies, wa
+	return s, nil
+}
+
+// PasskeysAvailable reports whether passkeys are configured.
+func (s *Service) PasskeysAvailable() bool { return s.wa != nil }
+
+func (s *Service) loadUser(ctx context.Context, u *userdom.User) (waUser, []mfadom.Passkey, error) {
+	if s.wa == nil {
+		return waUser{}, nil, mfadom.ErrPasskeyUnavailable
+	}
+	list, err := s.passkeys.ListPasskeys(ctx, u.ID)
+	if err != nil {
+		return waUser{}, nil, err
+	}
+	creds := make([]webauthn.Credential, 0, len(list))
+	for _, p := range list {
+		var c webauthn.Credential
+		if err := json.Unmarshal(p.Credential, &c); err != nil {
+			return waUser{}, nil, fmt.Errorf("mfa: decode passkey %s: %w", p.ID, err)
+		}
+		creds = append(creds, c)
+	}
+	return waUser{u: u, creds: creds}, list, nil
+}
+
+// hasPasskeys reports whether u has a registered passkey. With passkeys
+// unconfigured it is false, so a deployment that drops PUBLIC_URL falls back
+// to TOTP-only rather than locking passkey-only accounts out of the check
+// (policy then demands enrollment of a method that works).
+func (s *Service) hasPasskeys(ctx context.Context, userID uuid.UUID) (bool, error) {
+	if s.wa == nil {
+		return false, nil
+	}
+	list, err := s.passkeys.ListPasskeys(ctx, userID)
+	return len(list) > 0, err
+}
+
+// Methods lists the second factors u can answer a login challenge with.
+func (s *Service) Methods(ctx context.Context, u *userdom.User) ([]string, error) {
+	var out []string
+	enr, err := s.store.GetEnrollment(ctx, u.ID)
+	if err != nil && !errors.Is(err, mfadom.ErrNotFound) {
+		return nil, err
+	}
+	if enr != nil && enr.Enabled {
+		out = append(out, mfadom.MethodTOTP)
+	}
+	has, err := s.hasPasskeys(ctx, u.ID)
+	if err != nil {
+		return nil, err
+	}
+	if has {
+		out = append(out, mfadom.MethodPasskey)
+	}
+	return out, nil
+}
+
+// ListPasskeys returns u's passkeys.
+func (s *Service) ListPasskeys(ctx context.Context, u *userdom.User) ([]mfadom.Passkey, error) {
+	if s.wa == nil {
+		return nil, mfadom.ErrPasskeyUnavailable
+	}
+	return s.passkeys.ListPasskeys(ctx, u.ID)
+}
+
+// BeginPasskeyRegistration returns the options to hand to
+// navigator.credentials.create and parks the challenge server-side.
+func (s *Service) BeginPasskeyRegistration(ctx context.Context, u *userdom.User) (json.RawMessage, error) {
+	wu, list, err := s.loadUser(ctx, u)
+	if err != nil {
+		return nil, err
+	}
+	if len(list) >= maxPasskeyCount {
+		return nil, mfadom.ErrPasskeyLimit
+	}
+	exclude := make([]protocol.CredentialDescriptor, 0, len(wu.creds))
+	for _, c := range wu.creds {
+		exclude = append(exclude, c.Descriptor())
+	}
+	creation, session, err := s.wa.BeginRegistration(wu,
+		webauthn.WithExclusions(exclude),
+		webauthn.WithResidentKeyRequirement(protocol.ResidentKeyRequirementPreferred),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("mfa: begin passkey registration: %w", err)
+	}
+	if err := s.putCeremony(ctx, "reg:"+u.ID.String(), session); err != nil {
+		return nil, err
+	}
+	return json.Marshal(creation)
+}
+
+// FinishPasskeyRegistration verifies the authenticator's response to the
+// options BeginPasskeyRegistration issued and stores the new passkey.
+func (s *Service) FinishPasskeyRegistration(ctx context.Context, u *userdom.User, name string, response []byte) (*mfadom.Passkey, error) {
+	wu, _, err := s.loadUser(ctx, u)
+	if err != nil {
+		return nil, err
+	}
+	session, err := s.takeCeremony(ctx, "reg:"+u.ID.String(), mfadom.ErrPasskeyInvalid)
+	if err != nil {
+		return nil, err
+	}
+	parsed, err := protocol.ParseCredentialCreationResponseBytes(response)
+	if err != nil {
+		return nil, mfadom.ErrPasskeyInvalid
+	}
+	cred, err := s.wa.CreateCredential(wu, *session, parsed)
+	if err != nil {
+		return nil, mfadom.ErrPasskeyInvalid
+	}
+	raw, err := json.Marshal(cred)
+	if err != nil {
+		return nil, err
+	}
+	name = strings.TrimSpace(name)
+	if name == "" {
+		name = "Passkey"
+	}
+	if r := []rune(name); len(r) > maxPasskeyName {
+		name = string(r[:maxPasskeyName])
+	}
+	p := &mfadom.Passkey{
+		ID: uuid.New(), UserID: u.ID, Name: name,
+		CredentialID: cred.ID, Credential: raw, CreatedAt: s.now(),
+	}
+	if err := s.passkeys.AddPasskey(ctx, p); err != nil {
+		return nil, err
+	}
+	return p, nil
+}
+
+// BeginPasskeyVerification returns the WebAuthn request options for proving,
+// from a signed-in session, that the user holds one of their passkeys.
+func (s *Service) BeginPasskeyVerification(ctx context.Context, u *userdom.User) (json.RawMessage, error) {
+	// Signed in already, so "no passkey" is a 404-style answer, not the 401
+	// a login gives (which would trigger a token refresh).
+	if has, err := s.hasPasskeys(ctx, u.ID); err != nil {
+		return nil, err
+	} else if !has {
+		return nil, mfadom.ErrPasskeyNotFound
+	}
+	return s.beginAssertion(ctx, u, "verify:"+u.ID.String())
+}
+
+// DeletePasskey removes one of u's passkeys, on the strength of an assertion
+// from any of u's passkeys (itself included) over the options
+// BeginPasskeyVerification issued. A session alone can't remove a second
+// factor, the same bar turning TOTP off sets with a code.
+func (s *Service) DeletePasskey(ctx context.Context, u *userdom.User, id uuid.UUID, response []byte) error {
+	if s.wa == nil {
+		return mfadom.ErrPasskeyUnavailable
+	}
+	if err := s.verifyAssertion(ctx, u, "verify:"+u.ID.String(), response, mfadom.ErrPasskeyInvalid); err != nil {
+		return err
+	}
+	return s.passkeys.DeletePasskey(ctx, u.ID, id)
+}
+
+// BeginPasskeyLogin returns the options to hand to navigator.credentials.get
+// for the login challenge ceremonyID (the challenge token's id).
+func (s *Service) BeginPasskeyLogin(ctx context.Context, u *userdom.User, ceremonyID string) (json.RawMessage, error) {
+	return s.beginAssertion(ctx, u, "login:"+ceremonyID)
+}
+
+// VerifyPasskeyLogin checks the authenticator's assertion for ceremonyID,
+// enforcing the IP allow-lists first, and records the new sign counter.
+//
+// A wrong assertion is not counted toward the TOTP lockout: it is a signature
+// over a fresh server challenge, so there is nothing to guess.
+func (s *Service) VerifyPasskeyLogin(ctx context.Context, u *userdom.User, ceremonyID string, response []byte, clientIP string) error {
+	if err := s.CheckIP(ctx, u, clientIP); err != nil {
+		return err
+	}
+	return s.verifyAssertion(ctx, u, "login:"+ceremonyID, response, mfadom.ErrInvalidCode)
+}
+
+// beginAssertion parks a fresh challenge under key and returns the request
+// options for u's passkeys.
+func (s *Service) beginAssertion(ctx context.Context, u *userdom.User, key string) (json.RawMessage, error) {
+	wu, _, err := s.loadUser(ctx, u)
+	if err != nil {
+		return nil, err
+	}
+	if len(wu.creds) == 0 {
+		return nil, mfadom.ErrInvalidCode
+	}
+	assertion, session, err := s.wa.BeginLogin(wu)
+	if err != nil {
+		return nil, fmt.Errorf("mfa: begin passkey assertion: %w", err)
+	}
+	if err := s.putCeremony(ctx, key, session); err != nil {
+		return nil, err
+	}
+	return json.Marshal(assertion)
+}
+
+// verifyAssertion consumes the challenge under key and validates the
+// authenticator's response against u's passkeys, recording the new sign
+// counter. Every failure is invalid, which differs by caller: a login answers
+// 401, a signed-in request must not (a 401 would trigger a token refresh).
+func (s *Service) verifyAssertion(ctx context.Context, u *userdom.User, key string, response []byte, invalid error) error {
+	wu, list, err := s.loadUser(ctx, u)
+	if err != nil {
+		return err
+	}
+	session, err := s.takeCeremony(ctx, key, invalid)
+	if err != nil {
+		return err
+	}
+	parsed, err := protocol.ParseCredentialRequestResponseBytes(response)
+	if err != nil {
+		return invalid
+	}
+	cred, err := s.wa.ValidateLogin(wu, *session, parsed)
+	if err != nil {
+		return invalid
+	}
+	if cred.Authenticator.CloneWarning {
+		// The counter went backwards: the credential was likely copied.
+		return invalid
+	}
+	for _, p := range list {
+		if string(p.CredentialID) != string(cred.ID) {
+			continue
+		}
+		raw, err := json.Marshal(cred)
+		if err != nil {
+			return err
+		}
+		return s.passkeys.UpdatePasskeyCredential(ctx, p.ID, raw, s.now())
+	}
+	return invalid
+}
+
+func (s *Service) putCeremony(ctx context.Context, key string, session *webauthn.SessionData) error {
+	b, err := json.Marshal(session)
+	if err != nil {
+		return err
+	}
+	return s.ceremonies.Put(ctx, key, b, ceremonyTTL)
+}
+
+// takeCeremony consumes the parked challenge; an absent one (expired, already
+// used, or never begun) is an invalid attempt.
+func (s *Service) takeCeremony(ctx context.Context, key string, invalid error) (*webauthn.SessionData, error) {
+	b, err := s.ceremonies.Take(ctx, key)
+	if err != nil {
+		return nil, err
+	}
+	if b == nil {
+		return nil, invalid
+	}
+	var session webauthn.SessionData
+	if err := json.Unmarshal(b, &session); err != nil {
+		return nil, invalid
+	}
+	return &session, nil
+}

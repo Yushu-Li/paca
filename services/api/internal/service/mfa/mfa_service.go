@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/go-webauthn/webauthn/webauthn"
 	"github.com/google/uuid"
 
 	mfadom "github.com/Paca-AI/api/internal/domain/mfa"
@@ -43,6 +44,11 @@ type Service struct {
 	enc    *secret.Encryptor
 	issuer string
 	now    func() time.Time
+
+	// Set by WithPasskeys; nil wa means passkeys are off.
+	passkeys   mfadom.PasskeyStore
+	ceremonies mfadom.CeremonyStore
+	wa         *webauthn.WebAuthn
 }
 
 // New returns a Service. enc may be nil (ENCRYPTION_KEY unset): existing
@@ -71,8 +77,15 @@ func (s *Service) CheckLogin(ctx context.Context, u *userdom.User, otp, clientIP
 	if err != nil && !errors.Is(err, mfadom.ErrNotFound) {
 		return err
 	}
-	if enr != nil && enr.Enabled {
-		if strings.TrimSpace(otp) == "" {
+	totpOn := enr != nil && enr.Enabled
+	passkeyOn, err := s.hasPasskeys(ctx, u.ID)
+	if err != nil {
+		return err
+	}
+	if totpOn || passkeyOn {
+		// A passkey is answered through its own endpoints, so a code here is
+		// only ever TOTP/recovery; an account with passkeys alone has none.
+		if strings.TrimSpace(otp) == "" || !totpOn {
 			return mfadom.ErrRequired
 		}
 		return s.verifySecondFactor(ctx, enr, otp)
@@ -177,6 +190,10 @@ func (s *Service) SetupRequired(ctx context.Context, u *userdom.User) (bool, err
 	}
 	if !policy.RequireMFA || !hasAny(u.RoleNames(), policy.PrivilegedRoles) {
 		return false, nil
+	}
+	has, err := s.hasPasskeys(ctx, u.ID)
+	if err != nil || has {
+		return false, err
 	}
 	enr, err := s.store.GetEnrollment(ctx, u.ID)
 	if errors.Is(err, mfadom.ErrNotFound) {
@@ -302,7 +319,13 @@ func (s *Service) Disable(ctx context.Context, u *userdom.User, code string) err
 // Reset removes a user's enrollment without a second factor — the admin
 // recovery path for a user who lost both device and recovery codes.
 func (s *Service) Reset(ctx context.Context, userID uuid.UUID) error {
-	return s.store.DeleteEnrollment(ctx, userID)
+	if err := s.store.DeleteEnrollment(ctx, userID); err != nil {
+		return err
+	}
+	if s.passkeys != nil {
+		return s.passkeys.DeleteUserPasskeys(ctx, userID)
+	}
+	return nil
 }
 
 // Status reports whether MFA is enabled and how many recovery codes remain.

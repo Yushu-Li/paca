@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -29,6 +30,12 @@ type MFAService interface {
 	RegenerateRecoveryCodes(ctx context.Context, u *userdom.User, code string) ([]string, error)
 	Status(ctx context.Context, u *userdom.User) (bool, int, error)
 	Reset(ctx context.Context, userID uuid.UUID) error
+	PasskeysAvailable() bool
+	ListPasskeys(ctx context.Context, u *userdom.User) ([]mfadom.Passkey, error)
+	BeginPasskeyRegistration(ctx context.Context, u *userdom.User) (json.RawMessage, error)
+	FinishPasskeyRegistration(ctx context.Context, u *userdom.User, name string, response []byte) (*mfadom.Passkey, error)
+	BeginPasskeyVerification(ctx context.Context, u *userdom.User) (json.RawMessage, error)
+	DeletePasskey(ctx context.Context, u *userdom.User, id uuid.UUID, response []byte) error
 	GetPolicy(ctx context.Context) (*mfadom.Policy, error)
 	SetPolicy(ctx context.Context, p *mfadom.Policy, updatedBy *uuid.UUID, clientIP string) error
 	GetUserCIDRs(ctx context.Context, userID uuid.UUID) ([]string, error)
@@ -80,7 +87,7 @@ func (h *MFAHandler) Status(w http.ResponseWriter, r *http.Request) {
 		presenter.Error(w, r, err)
 		return
 	}
-	presenter.OK(w, r, dto.MFAStatusResponse{Enabled: enabled, RecoveryCodesLeft: left})
+	presenter.OK(w, r, dto.MFAStatusResponse{Enabled: enabled, RecoveryCodesLeft: left, PasskeysAvailable: h.svc.PasskeysAvailable()})
 }
 
 // Begin handles POST /users/me/mfa/enroll.
@@ -257,6 +264,52 @@ func (h *MFAHandler) SetupConfirm(w http.ResponseWriter, r *http.Request) {
 	presenter.OK(w, r, dto.MFARecoveryCodesResponse{RecoveryCodes: codes})
 }
 
+// SetupPasskeyBegin handles POST /auth/mfa/setup/passkey/options: the
+// passkey twin of SetupBegin, with the same password authentication and the
+// same refusal for accounts that already have a second factor or need none.
+func (h *MFAHandler) SetupPasskeyBegin(w http.ResponseWriter, r *http.Request) {
+	var req dto.MFASetupRequest
+	if !middleware.BindJSON(w, r, &req) {
+		return
+	}
+	u, err := h.passwordUser(r, req.Username, req.Password)
+	if err != nil {
+		presenter.Error(w, r, err)
+		return
+	}
+	if !h.requireSetup(w, r, u) {
+		return
+	}
+	opts, err := h.svc.BeginPasskeyRegistration(r.Context(), u)
+	if err != nil {
+		presenter.Error(w, r, err)
+		return
+	}
+	presenter.OK(w, r, map[string]any{"options": opts})
+}
+
+// SetupPasskeyFinish handles POST /auth/mfa/setup/passkey/finish.
+func (h *MFAHandler) SetupPasskeyFinish(w http.ResponseWriter, r *http.Request) {
+	var req dto.PasskeySetupFinishRequest
+	if !middleware.BindJSON(w, r, &req) {
+		return
+	}
+	u, err := h.passwordUser(r, req.Username, req.Password)
+	if err != nil {
+		presenter.Error(w, r, err)
+		return
+	}
+	if !h.requireSetup(w, r, u) {
+		return
+	}
+	p, err := h.svc.FinishPasskeyRegistration(r.Context(), u, req.Name, req.Credential)
+	if err != nil {
+		presenter.Error(w, r, err)
+		return
+	}
+	presenter.OK(w, r, passkeyResponse(*p))
+}
+
 // GetPolicy handles GET /admin/auth-security.
 func (h *MFAHandler) GetPolicy(w http.ResponseWriter, r *http.Request) {
 	p, err := h.svc.GetPolicy(r.Context())
@@ -359,4 +412,97 @@ func (h *MFAHandler) ResetUserMFA(w http.ResponseWriter, r *http.Request) {
 func actorID(r *http.Request) uuid.UUID {
 	id, _ := middleware.ActorIDFromContext(r.Context())
 	return id
+}
+
+func passkeyResponse(p mfadom.Passkey) dto.PasskeyResponse {
+	return dto.PasskeyResponse{ID: p.ID.String(), Name: p.Name, CreatedAt: p.CreatedAt, LastUsedAt: p.LastUsedAt}
+}
+
+// ListPasskeys handles GET /users/me/passkeys.
+func (h *MFAHandler) ListPasskeys(w http.ResponseWriter, r *http.Request) {
+	u, ok := h.me(w, r)
+	if !ok {
+		return
+	}
+	list, err := h.svc.ListPasskeys(r.Context(), u)
+	if err != nil {
+		presenter.Error(w, r, err)
+		return
+	}
+	out := make([]dto.PasskeyResponse, 0, len(list))
+	for _, p := range list {
+		out = append(out, passkeyResponse(p))
+	}
+	presenter.OK(w, r, out)
+}
+
+// BeginPasskeyRegistration handles POST /users/me/passkeys/register/options.
+func (h *MFAHandler) BeginPasskeyRegistration(w http.ResponseWriter, r *http.Request) {
+	u, ok := h.me(w, r)
+	if !ok {
+		return
+	}
+	opts, err := h.svc.BeginPasskeyRegistration(r.Context(), u)
+	if err != nil {
+		presenter.Error(w, r, err)
+		return
+	}
+	presenter.OK(w, r, map[string]any{"options": opts})
+}
+
+// FinishPasskeyRegistration handles POST /users/me/passkeys/register/finish.
+func (h *MFAHandler) FinishPasskeyRegistration(w http.ResponseWriter, r *http.Request) {
+	u, ok := h.me(w, r)
+	if !ok {
+		return
+	}
+	var req dto.PasskeyRegisterFinishRequest
+	if !middleware.BindJSON(w, r, &req) {
+		return
+	}
+	p, err := h.svc.FinishPasskeyRegistration(r.Context(), u, req.Name, req.Credential)
+	if err != nil {
+		presenter.Error(w, r, err)
+		return
+	}
+	presenter.OK(w, r, passkeyResponse(*p))
+}
+
+// BeginPasskeyVerification handles POST /users/me/passkeys/verify/options:
+// the WebAuthn request the user must answer to remove a passkey.
+func (h *MFAHandler) BeginPasskeyVerification(w http.ResponseWriter, r *http.Request) {
+	u, ok := h.me(w, r)
+	if !ok {
+		return
+	}
+	opts, err := h.svc.BeginPasskeyVerification(r.Context(), u)
+	if err != nil {
+		presenter.Error(w, r, err)
+		return
+	}
+	presenter.OK(w, r, map[string]any{"options": opts})
+}
+
+// DeletePasskey handles DELETE /users/me/passkeys/{passkeyId}. Like turning
+// TOTP off, it needs proof beyond the session: here an assertion from one of
+// the account's passkeys, over the options BeginPasskeyVerification issued.
+func (h *MFAHandler) DeletePasskey(w http.ResponseWriter, r *http.Request) {
+	u, ok := h.me(w, r)
+	if !ok {
+		return
+	}
+	id, err := uuid.Parse(chi.URLParam(r, "passkeyId"))
+	if err != nil {
+		presenter.Error(w, r, mfadom.ErrPasskeyNotFound)
+		return
+	}
+	var req dto.PasskeyDeleteRequest
+	if !middleware.BindJSON(w, r, &req) {
+		return
+	}
+	if err := h.svc.DeletePasskey(r.Context(), u, id, req.Credential); err != nil {
+		presenter.Error(w, r, err)
+		return
+	}
+	presenter.NoContent(w)
 }

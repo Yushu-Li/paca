@@ -1,6 +1,11 @@
 // Package dto defines request and response shapes for auth endpoints.
 package dto
 
+import (
+	"encoding/json"
+	"time"
+)
+
 // LoginRequest is the body for POST /auth/login.
 type LoginRequest struct {
 	Username   string `json:"username" binding:"required"`
@@ -44,6 +49,15 @@ type MFASetupRequest struct {
 	Code string `json:"code,omitempty"`
 }
 
+// PasskeySetupFinishRequest is the body for finishing a pre-login passkey
+// registration: the account's password plus the authenticator's response.
+type PasskeySetupFinishRequest struct {
+	Username   string          `json:"username" binding:"required"`
+	Password   string          `json:"password" binding:"required"`
+	Name       string          `json:"name"`
+	Credential json.RawMessage `json:"credential" binding:"required"`
+}
+
 // MFAEnrollmentResponse is returned when enrollment begins.
 type MFAEnrollmentResponse struct {
 	Secret string `json:"secret"`
@@ -56,10 +70,47 @@ type MFARecoveryCodesResponse struct {
 	RecoveryCodes []string `json:"recovery_codes"`
 }
 
-// MFAStatusResponse is the caller's MFA state.
+// MFAStatusResponse is the caller's MFA state. Enabled is TOTP only;
+// passkeys are listed separately.
 type MFAStatusResponse struct {
 	Enabled           bool `json:"enabled"`
 	RecoveryCodesLeft int  `json:"recovery_codes_left"`
+	// PasskeysAvailable is false when the server has no relying-party
+	// identity configured; clients then hide passkey controls.
+	PasskeysAvailable bool `json:"passkeys_available"`
+}
+
+// PasskeyLoginOptionsRequest is the body for POST /auth/mfa/passkey/options.
+type PasskeyLoginOptionsRequest struct {
+	Challenge string `json:"challenge" binding:"required"`
+}
+
+// PasskeyLoginVerifyRequest is the body for POST /auth/mfa/passkey/verify:
+// the login challenge plus the authenticator's assertion, verbatim.
+type PasskeyLoginVerifyRequest struct {
+	Challenge  string          `json:"challenge" binding:"required"`
+	Credential json.RawMessage `json:"credential" binding:"required"`
+}
+
+// PasskeyRegisterFinishRequest is the body for finishing a registration.
+type PasskeyRegisterFinishRequest struct {
+	Name       string          `json:"name"`
+	Credential json.RawMessage `json:"credential" binding:"required"`
+}
+
+// PasskeyDeleteRequest re-authenticates the user before a passkey is removed:
+// the authenticator's assertion over the options from
+// POST /users/me/passkeys/verify/options, verbatim.
+type PasskeyDeleteRequest struct {
+	Credential json.RawMessage `json:"credential" binding:"required"`
+}
+
+// PasskeyResponse is one registered passkey.
+type PasskeyResponse struct {
+	ID         string     `json:"id"`
+	Name       string     `json:"name"`
+	CreatedAt  time.Time  `json:"created_at"`
+	LastUsedAt *time.Time `json:"last_used_at"`
 }
 
 // AuthSecurityPolicy is the instance login policy (read and write shape).
