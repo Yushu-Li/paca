@@ -103,6 +103,7 @@ prefixed `PACA_` are installer-only choices with no direct `.env` equivalent.
 | `PACA_WEB` | `bundled`/`external` | `bundled` |
 | `PACA_AGENT_RUNNER` | Include the Agent Runner service (`yes`/`no`) | `yes` |
 | `INTERNAL_API_KEY` | API → Agent Runner pre-shared key | auto-generated |
+| `VALKEY_PASSWORD` | Password (`requirepass`) of the bundled Valkey; URL-safe, embedded in the default `REDIS_URL`. Not needed with an external `REDIS_URL` | auto-generated (a preset value is used as-is) |
 | `JWT_SECRET` | | auto-generated |
 
 Fully unattended example — custom domain, S3, no Agent Runner:

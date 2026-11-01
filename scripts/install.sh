@@ -68,6 +68,8 @@
 #     REDIS_URL                    Setting this selects external Redis/Valkey
 #                                  and suppresses the bundled Valkey container.
 #                                  Unset/empty uses bundled Valkey.
+#     VALKEY_PASSWORD              URL-safe password of the bundled Valkey
+#                                  (default: auto-generated)
 #
 #   Database backups (bundled Postgres only; skipped for external DB)
 #     BACKUP_ENABLED               true/false                          (default: true)
@@ -763,6 +765,12 @@ yes_no INCLUDE_AGENT_RUNNER "Include the Agent Runner service?" "${PACA_AGENT_RU
 
 SCALE_AGENT_RUNNER=""
 INTERNAL_API_KEY="${INTERNAL_API_KEY:-$(rand_hex 32)}"
+# Bundled Valkey's requirepass. Always set (also when external Valkey is used)
+# because the compose file requires the variable. It is embedded in the default
+# REDIS_URL, so a preset value must be URL-safe.
+VALKEY_PASSWORD="${VALKEY_PASSWORD:-$(rand_hex 32)}"
+[[ "$VALKEY_PASSWORD" =~ ^[A-Za-z0-9._~-]+$ ]] \
+    || die "VALKEY_PASSWORD must be non-empty and URL-safe (letters, digits, . _ ~ -)."
 
 if [[ "$INCLUDE_AGENT_RUNNER" == "no" ]]; then
     SCALE_AGENT_RUNNER="--scale agent-runner=0"
@@ -838,6 +846,13 @@ else
     KEEP_ENV="no"
 fi
 
+if [[ "$KEEP_ENV" == "yes" && -z "$(get_env_var .env VALKEY_PASSWORD)" ]]; then
+    # .env predates the password-protected Valkey: add one, otherwise
+    # `docker compose up` refuses to start.
+    printf '\nVALKEY_PASSWORD=%s\n' "$VALKEY_PASSWORD" >>.env
+    info "Added VALKEY_PASSWORD to the kept .env (bundled Valkey now requires a password)."
+fi
+
 if [[ "$KEEP_ENV" == "no" ]]; then
     JWT_SECRET="${JWT_SECRET:-$(rand_hex 32)}"
 
@@ -896,6 +911,8 @@ BACKUP_RETENTION_DAYS=${BACKUP_RETENTION_DAYS}
 # TZ=America/New_York
 
 # ── Cache (Valkey) ────────────────────────────────────────────────────────────
+# Password for the bundled Valkey container (requirepass).
+VALKEY_PASSWORD=${VALKEY_PASSWORD}
 # Leave blank to use the bundled Valkey container.
 REDIS_URL=${REDIS_URL_ENV}
 

@@ -123,6 +123,7 @@ secrets:
   encryptionKey: "<openssl rand -hex 32>"       # must be exactly 64 hex chars
   internalApiKey: "<openssl rand -hex 32>"
   postgresPassword: "<a strong password>"
+  valkeyPassword: "<openssl rand -hex 32>"
 
 rustfs:
   secret:

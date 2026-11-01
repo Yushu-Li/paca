@@ -25,6 +25,7 @@
         "encryptionKey": { "type": "string" },
         "internalApiKey": { "type": "string" },
         "postgresPassword": { "type": "string" },
+        "valkeyPassword": { "type": "string" },
         "storageAccessKeyId": { "type": "string" },
         "storageSecretAccessKey": { "type": "string" }
       }

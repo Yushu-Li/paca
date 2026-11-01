@@ -43,6 +43,11 @@ secrets:
   # internal-only routes. Only required when agentRunner.enabled.
   internalApiKey: ""
   postgresPassword: ""
+  # Password (requirepass) of the bundled Valkey; required when valkey.enabled.
+  # Without it any pod in the cluster, including agent sandboxes, could use
+  # Valkey (agent triggers, environment commands, all conversation events).
+  # With existingSecret, put it under the VALKEY_PASSWORD key.
+  valkeyPassword: ""
   # Only read when rustfs.enabled is false (external S3) — the bundled
   # RustFS's own credentials live under rustfs.secret.rustfs.* instead, see
   # that section's doc comment for why the two aren't unified into one.

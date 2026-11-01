@@ -200,6 +200,10 @@ set_env_var() {
     mv "$tmp" "$file"
 }
 
+# rand_hex [LEN]
+# LEN random lowercase hex characters (default 32). Same helper as install.sh.
+rand_hex() { ( set +o pipefail; LC_ALL=C tr -dc 'a-f0-9' </dev/urandom | head -c "${1:-32}"; ); }
+
 # has_env_var FILE VAR
 has_env_var() {
     grep -q "^${2}=" "$1" 2>/dev/null
@@ -623,6 +627,16 @@ fi
 if [[ "$GATEWAY_VARS_ADDED" == "1" ]]; then
     warn "Ports 80 and 443 must both be reachable from the internet for Let's Encrypt to succeed."
     info "Already behind another TLS terminator (a load balancer, Cloudflare, etc.)? Set SITE_ADDRESS=:80 in .env to keep this gateway on plain HTTP."
+fi
+
+# Backfill the bundled Valkey's password. Installations from before Valkey
+# was password-protected have none in .env, and the compose file refuses to
+# start without it (it is required even with an external REDIS_URL, where any
+# value will do). Existing data is unaffected: requirepass is a runtime flag.
+if [[ -z "$(get_env_var .env VALKEY_PASSWORD)" ]]; then
+    backup_env_once
+    set_env_var .env VALKEY_PASSWORD "$(rand_hex 32)"
+    info "Added VALKEY_PASSWORD to .env (the bundled Valkey now requires a password)."
 fi
 
 # Which optional services should stay scaled to 0 on this upgrade, so you
