@@ -99,6 +99,7 @@ prefixed `PACA_` are installer-only choices with no direct `.env` equivalent.
 | `PACA_HTTPS` | `yes`/`no`; ignored when `PACA_ADDRESS=localhost` | `yes` |
 | `GATEWAY_PORT` | Only used when serving plain HTTP | `80` |
 | `PUBLIC_URL` | Full public URL, no trailing slash | derived from the above |
+| `PASSKEY_RP_ID` | Optional WebAuthn relying-party ID for passkeys; override only to share passkeys across subdomains (use a parent domain of `PUBLIC_URL`'s host). Passkeys are off when `PUBLIC_URL` is unset, and changing this invalidates every registered passkey | host of `PUBLIC_URL` |
 | `PACA_WEB` | `bundled`/`external` | `bundled` |
 | `PACA_AGENT_RUNNER` | Include the Agent Runner service (`yes`/`no`) | `yes` |
 | `INTERNAL_API_KEY` | API → Agent Runner pre-shared key | auto-generated |
@@ -278,7 +279,8 @@ docker compose --env-file .env up -d --scale valkey=0
 The connection must be reachable from the API, realtime, and agent-runner
 containers; `localhost` inside a container is not the Docker host. Use a
 Redis-compatible service that supports Paca's cache, pub/sub, and streams
-operations. Percent-encode reserved characters in credentials. The installer
+operations (`GETDEL`, so Redis 6.2+ or Valkey, is required for passkey
+ceremonies). Percent-encode reserved characters in credentials. The installer
 single-quotes the dotenv value to preserve literal `$` characters and does not
 print the connection URL. Keep that quoting when editing `.env` manually.
 

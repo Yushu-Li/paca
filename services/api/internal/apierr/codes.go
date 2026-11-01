@@ -34,6 +34,12 @@ const (
 	// CodeMFAUnavailable means the server cannot store TOTP secrets
 	// (ENCRYPTION_KEY unset).
 	CodeMFAUnavailable Code = "MFA_UNAVAILABLE"
+	// CodePasskeyInvalid means a passkey registration did not verify.
+	CodePasskeyInvalid Code = "PASSKEY_INVALID"
+	// CodePasskeyLimit means the account already has the most passkeys allowed.
+	CodePasskeyLimit Code = "PASSKEY_LIMIT"
+	// CodePasskeyNotFound means the account has no passkey with that id.
+	CodePasskeyNotFound Code = "PASSKEY_NOT_FOUND"
 	// CodeInvalidCIDR means an allow-list entry is not an IP or CIDR.
 	CodeInvalidCIDR Code = "INVALID_CIDR"
 	// CodeSelfLockout means the saved allow-list would exclude the admin saving it.

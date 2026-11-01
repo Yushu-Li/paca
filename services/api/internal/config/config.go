@@ -71,6 +71,10 @@ type ServerConfig struct {
 	Port         string
 	CookieSecure bool   // set Secure flag on auth cookies; enable when behind an SSL-terminating proxy
 	PublicURL    string // externally reachable base URL (for example, https://paca.example.com)
+	// PasskeyRPID overrides the WebAuthn relying-party ID, which defaults to
+	// the host of PublicURL. Set it to a parent domain to share passkeys
+	// across subdomains. Changing it invalidates every registered passkey.
+	PasskeyRPID string
 	// CORSAllowedOrigins is the allow-list of frontend origins permitted to
 	// make cross-origin requests. A single "*" (the default, for backward
 	// compatibility with existing deployments that don't set CORS_ORIGINS)

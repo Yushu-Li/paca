@@ -663,8 +663,12 @@ test.describe("In the browser", () => {
 		await page.getByRole("button", { name: "Sign in" }).click();
 
 		await expect(
-			page.getByRole("heading", { name: "Set up two-step verification" }),
+			page.getByRole("heading", { name: "Secure your account" }),
 		).toBeVisible();
+		await page
+			.getByRole("radio", { name: /Authenticator app/ })
+			.check({ force: true });
+		await page.getByRole("button", { name: "Continue", exact: true }).click();
 		const secret = (
 			await page.locator("p.select-all").first().innerText()
 		).trim();
@@ -677,6 +681,7 @@ test.describe("In the browser", () => {
 		await expect(
 			page.getByRole("heading", { name: "Save your recovery codes" }),
 		).toBeVisible();
+		await page.getByRole("checkbox").check();
 		await page.getByRole("button", { name: "Continue to sign in" }).click();
 
 		await expect(page).toHaveURL(/\/login\/mfa/);

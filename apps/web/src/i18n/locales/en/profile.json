@@ -178,6 +178,34 @@
 				"confirm": "Generate",
 				"doneTitle": "Your new recovery codes"
 			}
+		},
+		"passkeys": {
+			"title": "Passkeys",
+			"description": "Sign in with your fingerprint, face, screen lock or a security key as your second step, instead of a code.",
+			"add": "Add a passkey",
+			"unsupported": "This browser doesn't support passkeys.",
+			"empty": "You haven't added a passkey yet.",
+			"added": "Added {{date}}",
+			"lastUsed": "Last used {{date}}",
+			"neverUsed": "Never used",
+			"removeLabel": "Remove {{name}}",
+			"defaultName": "Passkey",
+			"addTitle": "Add a passkey",
+			"addDescription": "Give it a name you'll recognise, then follow your browser's prompt.",
+			"nameLabel": "Name",
+			"namePlaceholder": "e.g. Work laptop",
+			"continue": "Continue",
+			"removeTitle": "Remove passkey",
+			"removeDescription": "“{{name}}” will no longer work to sign in. You'll be asked to confirm with one of your passkeys.",
+			"remove": "Remove",
+			"errors": {
+				"load": "Couldn't load your passkeys.",
+				"cancelled": "The passkey prompt was cancelled or timed out.",
+				"alreadyRegistered": "This device or key is already registered as a passkey.",
+				"limit": "You've reached the maximum number of passkeys. Remove one first.",
+				"invalid": "The passkey couldn't be verified. Please try again.",
+				"generic": "Something went wrong. Please try again."
+			}
 		}
 	}
 }

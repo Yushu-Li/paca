@@ -36,6 +36,9 @@ type TokenPair struct {
 	// factor is still owed: no session exists and every other field is empty.
 	// Hand it to CompleteMFALogin with a code to get the real pair.
 	MFAChallenge string
+	// MFAMethods names the second factors the account can answer
+	// MFAChallenge with ("totp", "passkey").
+	MFAMethods []string
 }
 
 // LoginThrottle limits wrong-password attempts. Keys are normalised by

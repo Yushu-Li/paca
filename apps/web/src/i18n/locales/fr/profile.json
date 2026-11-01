@@ -178,6 +178,34 @@
 				"confirm": "Générer",
 				"doneTitle": "Vos nouveaux codes de récupération"
 			}
+		},
+		"passkeys": {
+			"title": "Clés d'accès",
+			"description": "Connectez-vous avec votre empreinte, votre visage, le verrouillage d'écran ou une clé de sécurité comme seconde étape, à la place d'un code.",
+			"add": "Ajouter une clé d'accès",
+			"unsupported": "Ce navigateur ne prend pas en charge les clés d'accès.",
+			"empty": "Vous n'avez pas encore ajouté de clé d'accès.",
+			"added": "Ajoutée le {{date}}",
+			"lastUsed": "Dernière utilisation : {{date}}",
+			"neverUsed": "Jamais utilisée",
+			"removeLabel": "Supprimer {{name}}",
+			"defaultName": "Clé d'accès",
+			"addTitle": "Ajouter une clé d'accès",
+			"addDescription": "Donnez-lui un nom que vous reconnaîtrez, puis suivez les instructions du navigateur.",
+			"nameLabel": "Nom",
+			"namePlaceholder": "p. ex. Ordinateur du bureau",
+			"continue": "Continuer",
+			"removeTitle": "Supprimer la clé d'accès",
+			"removeDescription": "« {{name}} » ne permettra plus de se connecter. Il vous sera demandé de confirmer avec l'une de vos clés d'accès.",
+			"remove": "Supprimer",
+			"errors": {
+				"load": "Impossible de charger vos clés d'accès.",
+				"cancelled": "La demande de clé d'accès a été annulée ou a expiré.",
+				"alreadyRegistered": "Cet appareil ou cette clé est déjà enregistré comme clé d'accès.",
+				"limit": "Vous avez atteint le nombre maximal de clés d'accès. Supprimez-en une d'abord.",
+				"invalid": "La clé d'accès n'a pas pu être vérifiée. Veuillez réessayer.",
+				"generic": "Une erreur s'est produite. Veuillez réessayer."
+			}
 		}
 	}
 }

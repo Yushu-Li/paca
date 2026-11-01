@@ -3,6 +3,7 @@ package auth
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -42,6 +43,14 @@ type RefreshTokenStore interface {
 // and the second factor. Nil means password alone is enough.
 type LoginGate interface {
 	CheckLogin(ctx context.Context, u *userdom.User, otp, clientIP string) error
+}
+
+// PasskeyGate is the optional passkey half of the login gate. The gate
+// installed with WithLoginGate also implements it when passkeys are available.
+type PasskeyGate interface {
+	Methods(ctx context.Context, u *userdom.User) ([]string, error)
+	BeginPasskeyLogin(ctx context.Context, u *userdom.User, ceremonyID string) (json.RawMessage, error)
+	VerifyPasskeyLogin(ctx context.Context, u *userdom.User, ceremonyID string, response []byte, clientIP string) error
 }
 
 // Service is the concrete implementation of domain/auth.Service.
@@ -138,7 +147,13 @@ func (s *Service) Login(ctx context.Context, in domainauth.LoginInput) (*domaina
 				if ierr != nil {
 					return nil, ierr
 				}
-				return &domainauth.TokenPair{MFAChallenge: challenge}, nil
+				pair := &domainauth.TokenPair{MFAChallenge: challenge}
+				if pg, ok := s.gate.(PasskeyGate); ok {
+					if pair.MFAMethods, ierr = pg.Methods(ctx, u); ierr != nil {
+						return nil, ierr
+					}
+				}
+				return pair, nil
 			}
 			return nil, err
 		}
@@ -173,31 +188,46 @@ func (s *Service) trustClient(ctx context.Context, key, ip string) {
 	}
 }
 
-// CompleteMFALogin finishes a login that stopped at an MFA challenge.
-func (s *Service) CompleteMFALogin(ctx context.Context, challenge, code, clientIP string) (*domainauth.TokenPair, error) {
+// challengeUser resolves an MFA challenge token to the account it was issued
+// for. Anything but a live challenge for an existing account is ErrTokenInvalid.
+func (s *Service) challengeUser(ctx context.Context, challenge string) (*userdom.User, *domainauth.Claims, error) {
 	claims, err := s.tokens.Verify(challenge)
 	if err != nil || claims.Kind != jwttoken.MFAChallengeKind {
-		return nil, domainauth.ErrTokenInvalid
+		return nil, nil, domainauth.ErrTokenInvalid
 	}
 	id, err := uuid.Parse(claims.Subject)
 	if err != nil {
-		return nil, domainauth.ErrTokenInvalid
+		return nil, nil, domainauth.ErrTokenInvalid
 	}
 	u, err := s.users.FindByID(ctx, id)
 	if err != nil {
 		if errors.Is(err, userdom.ErrNotFound) {
-			return nil, domainauth.ErrTokenInvalid
+			return nil, nil, domainauth.ErrTokenInvalid
 		}
-		return nil, err
+		return nil, nil, err
 	}
 	if s.gate == nil {
-		return nil, domainauth.ErrTokenInvalid
+		return nil, nil, domainauth.ErrTokenInvalid
+	}
+	return u, claims, nil
+}
+
+// CompleteMFALogin finishes a login that stopped at an MFA challenge.
+func (s *Service) CompleteMFALogin(ctx context.Context, challenge, code, clientIP string) (*domainauth.TokenPair, error) {
+	u, claims, err := s.challengeUser(ctx, challenge)
+	if err != nil {
+		return nil, err
 	}
 	if err := s.gate.CheckLogin(ctx, u, code, clientIP); err != nil {
 		return nil, err
 	}
-	// Single use, spent only on success so a typo doesn't force the password
-	// again (the account lockout caps guesses).
+	return s.finishChallenge(ctx, u, claims, clientIP)
+}
+
+// finishChallenge spends the single-use challenge and starts the session.
+// Spent only on success so a typo doesn't force the password again (the
+// account lockout caps guesses).
+func (s *Service) finishChallenge(ctx context.Context, u *userdom.User, claims *domainauth.Claims, clientIP string) (*domainauth.TokenPair, error) {
 	if first, err := s.refreshStore.RecordFirstUse(ctx, claims.ID, mfaChallengeTTL); err != nil {
 		return nil, err
 	} else if first != nil {
@@ -205,6 +235,37 @@ func (s *Service) CompleteMFALogin(ctx context.Context, challenge, code, clientI
 	}
 	s.trustClient(ctx, domainauth.NormalizeLoginKey(u.Username), clientIP)
 	return s.IssueSession(u, claims.RememberMe)
+}
+
+// BeginPasskeyLogin returns the WebAuthn request options for the account a
+// login challenge was issued to.
+func (s *Service) BeginPasskeyLogin(ctx context.Context, challenge string) (json.RawMessage, error) {
+	u, claims, err := s.challengeUser(ctx, challenge)
+	if err != nil {
+		return nil, err
+	}
+	pg, ok := s.gate.(PasskeyGate)
+	if !ok {
+		return nil, mfadom.ErrPasskeyUnavailable
+	}
+	return pg.BeginPasskeyLogin(ctx, u, claims.ID)
+}
+
+// CompletePasskeyLogin finishes a login that stopped at an MFA challenge with
+// the authenticator's response to BeginPasskeyLogin's options.
+func (s *Service) CompletePasskeyLogin(ctx context.Context, challenge string, response []byte, clientIP string) (*domainauth.TokenPair, error) {
+	u, claims, err := s.challengeUser(ctx, challenge)
+	if err != nil {
+		return nil, err
+	}
+	pg, ok := s.gate.(PasskeyGate)
+	if !ok {
+		return nil, mfadom.ErrPasskeyUnavailable
+	}
+	if err := pg.VerifyPasskeyLogin(ctx, u, claims.ID, response, clientIP); err != nil {
+		return nil, err
+	}
+	return s.finishChallenge(ctx, u, claims, clientIP)
 }
 
 // IssueSession starts a new session for an already-authenticated user: a

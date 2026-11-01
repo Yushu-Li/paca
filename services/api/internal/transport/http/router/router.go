@@ -142,8 +142,12 @@ func New(deps Deps) http.Handler {
 				if deps.MFA != nil {
 					// Enrollment for an account that policy requires to use MFA
 					// but that cannot sign in until it has; password-authenticated.
+					r.With(authLimit(deps.AuthRateLimit)).Post("/mfa/passkey/options", deps.Auth.PasskeyOptions)
+					r.With(authLimit(deps.AuthRateLimit)).Post("/mfa/passkey/verify", deps.Auth.PasskeyVerify)
 					r.With(authLimit(deps.AuthRateLimit)).Post("/mfa/setup", deps.MFA.SetupBegin)
 					r.With(authLimit(deps.AuthRateLimit)).Post("/mfa/setup/confirm", deps.MFA.SetupConfirm)
+					r.With(authLimit(deps.AuthRateLimit)).Post("/mfa/setup/passkey/options", deps.MFA.SetupPasskeyBegin)
+					r.With(authLimit(deps.AuthRateLimit)).Post("/mfa/setup/passkey/finish", deps.MFA.SetupPasskeyFinish)
 				}
 				// Public — the link a password-set-token email points to;
 				// the token itself (not a session) proves the caller's right
@@ -183,6 +187,11 @@ func New(deps Deps) http.Handler {
 							r.Post("/me/mfa/confirm", deps.MFA.Confirm)
 							r.Post("/me/mfa/disable", deps.MFA.Disable)
 							r.Post("/me/mfa/recovery-codes", deps.MFA.RegenerateRecoveryCodes)
+							r.Get("/me/passkeys", deps.MFA.ListPasskeys)
+							r.Post("/me/passkeys/register/options", deps.MFA.BeginPasskeyRegistration)
+							r.Post("/me/passkeys/register/finish", deps.MFA.FinishPasskeyRegistration)
+							r.Post("/me/passkeys/verify/options", deps.MFA.BeginPasskeyVerification)
+							r.Delete("/me/passkeys/{passkeyId}", deps.MFA.DeletePasskey)
 						})
 					}
 					r.Post("/me/avatar/initiate-upload", deps.User.InitiateAvatarUpload)

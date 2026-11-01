@@ -173,7 +173,10 @@ describe("useLoginForm", () => {
 	});
 
 	it("moves to the code page, keeping the challenge, when a second factor is owed", async () => {
-		vi.mocked(login).mockResolvedValue("challenge-token");
+		vi.mocked(login).mockResolvedValue({
+			challenge: "challenge-token",
+			methods: ["totp", "passkey"],
+		});
 		mocks.navigateMock.mockResolvedValue(undefined);
 
 		const { result } = renderHook(() => useLoginForm("/projects/1"));
@@ -190,6 +193,7 @@ describe("useLoginForm", () => {
 		expect(mocks.navigateMock).toHaveBeenCalledWith({ to: "/login/mfa" });
 		expect(loadPendingMfa()).toEqual({
 			challenge: "challenge-token",
+			methods: ["totp", "passkey"],
 			redirectTo: "/projects/1",
 		});
 		// No session yet, so nothing signed in and no error either.

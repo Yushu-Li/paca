@@ -57,9 +57,13 @@ export function useLoginForm(redirectTo?: string) {
 		password: string,
 		rememberMe: boolean,
 	): Promise<void> {
-		const challenge = await login(username, password, rememberMe);
-		if (challenge) {
-			savePendingMfa({ challenge, redirectTo });
+		const mfa = await login(username, password, rememberMe);
+		if (mfa) {
+			savePendingMfa({
+				challenge: mfa.challenge,
+				methods: mfa.methods,
+				redirectTo,
+			});
 			await navigate({ to: "/login/mfa" });
 			return;
 		}

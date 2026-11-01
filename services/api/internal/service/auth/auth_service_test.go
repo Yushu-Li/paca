@@ -2,6 +2,7 @@ package auth_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -840,6 +841,69 @@ func TestLogin_MFAChallengeThenComplete(t *testing.T) {
 	pair, err := svc.CompleteMFALogin(ctx, step1.MFAChallenge, "123456", "1.1.1.1")
 	if err != nil || pair.AccessToken == "" || pair.RefreshTTL != 7*24*time.Hour {
 		t.Fatalf("right code must start a persistent session: %+v, %v", pair, err)
+	}
+}
+
+// passkeyGate owes a second factor and, like the real gate, can answer with a
+// passkey as well as a code.
+type passkeyGate struct {
+	otpGate
+	methods []string
+	begun   string
+}
+
+func (g *passkeyGate) Methods(context.Context, *userdom.User) ([]string, error) {
+	return g.methods, nil
+}
+
+func (g *passkeyGate) BeginPasskeyLogin(_ context.Context, _ *userdom.User, id string) (json.RawMessage, error) {
+	g.begun = id
+	return json.RawMessage(`{"publicKey":{}}`), nil
+}
+
+func (g *passkeyGate) VerifyPasskeyLogin(_ context.Context, _ *userdom.User, id string, resp []byte, _ string) error {
+	if id != g.begun || string(resp) != `{"id":"ok"}` {
+		return mfadom.ErrInvalidCode
+	}
+	return nil
+}
+
+func TestLogin_ChallengeListsMethodsAndPasskeyCompletes(t *testing.T) {
+	u := &userdom.User{ID: uuid.New(), Username: "alice", Roles: userRoles("USER"), PasswordHash: hashedPassword(t, "secret123")}
+	repo := &stubUserRepo{
+		findByUsername: func(context.Context, string) (*userdom.User, error) { return u, nil },
+		findByID:       func(context.Context, uuid.UUID) (*userdom.User, error) { return u, nil },
+	}
+	gate := &passkeyGate{methods: []string{"totp", "passkey"}}
+	svc := newAuthSvc(repo, &stubRefreshStore{}).WithLoginGate(gate)
+	ctx := context.Background()
+
+	step1, err := svc.Login(ctx, domainauth.LoginInput{Username: "alice", Password: "secret123"})
+	if err != nil || step1.MFAChallenge == "" {
+		t.Fatalf("step 1: %+v, %v", step1, err)
+	}
+	if got := step1.MFAMethods; len(got) != 2 || got[0] != "totp" || got[1] != "passkey" {
+		t.Fatalf("methods = %v, want [totp passkey]", got)
+	}
+
+	if _, err := svc.BeginPasskeyLogin(ctx, step1.MFAChallenge); err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	if _, err := svc.CompletePasskeyLogin(ctx, step1.MFAChallenge, []byte(`{"id":"bad"}`), "1.1.1.1"); !errors.Is(err, mfadom.ErrInvalidCode) {
+		t.Fatalf("bad assertion: got %v", err)
+	}
+	pair, err := svc.CompletePasskeyLogin(ctx, step1.MFAChallenge, []byte(`{"id":"ok"}`), "1.1.1.1")
+	if err != nil || pair.AccessToken == "" {
+		t.Fatalf("good assertion must start a session: %+v, %v", pair, err)
+	}
+	// A plain gate (no passkey support) offers no methods and no passkey step.
+	plain := newAuthSvc(repo, &stubRefreshStore{}).WithLoginGate(otpGate{})
+	step, _ := plain.Login(ctx, domainauth.LoginInput{Username: "alice", Password: "secret123"})
+	if len(step.MFAMethods) != 0 {
+		t.Fatalf("plain gate methods = %v", step.MFAMethods)
+	}
+	if _, err := plain.BeginPasskeyLogin(ctx, step.MFAChallenge); !errors.Is(err, mfadom.ErrPasskeyUnavailable) {
+		t.Fatalf("plain gate: got %v", err)
 	}
 }
 

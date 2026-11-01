@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -18,6 +19,8 @@ type fakeMFASvc struct {
 	MFAService
 	notRequired      bool
 	begun, confirmed bool
+	passkeyBegun     bool
+	passkeyAdded     bool
 	cidrs            []string
 }
 
@@ -52,6 +55,14 @@ func (f fakeUsers) FindByUsername(context.Context, string) (*userdom.User, error
 	return f.u, nil
 }
 
+func (f *fakeMFASvc) BeginPasskeyRegistration(context.Context, *userdom.User) (json.RawMessage, error) {
+	f.passkeyBegun = true
+	return json.RawMessage(`{"publicKey":{"challenge":"CHAL"}}`), nil
+}
+func (f *fakeMFASvc) FinishPasskeyRegistration(_ context.Context, _ *userdom.User, name string, _ []byte) (*mfadom.Passkey, error) {
+	f.passkeyAdded = true
+	return &mfadom.Passkey{ID: uuid.New(), Name: name}, nil
+}
 func newMFAHandler(t *testing.T) (*MFAHandler, *fakeMFASvc) {
 	t.Helper()
 	hash, _ := bcrypt.GenerateFromPassword([]byte("secret123"), bcrypt.MinCost)
@@ -107,5 +118,39 @@ func TestMFASetup_RefusedWhenPolicyDoesNotRequireIt(t *testing.T) {
 	}
 	if svc.begun || svc.confirmed {
 		t.Error("password alone must not establish a second factor on an account that need not use one")
+	}
+}
+
+func TestMFASetupPasskey_NeedsPasswordAndPolicy(t *testing.T) {
+	h, svc := newMFAHandler(t)
+
+	if rec := post(h.SetupPasskeyBegin, `{"username":"root","password":"wrongpass1"}`); rec.Code != http.StatusUnauthorized || svc.passkeyBegun {
+		t.Fatalf("wrong password: status %d", rec.Code)
+	}
+	rec := post(h.SetupPasskeyBegin, `{"username":"root","password":"secret123"}`)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "CHAL") {
+		t.Fatalf("begin: status %d body %s", rec.Code, rec.Body)
+	}
+	if rec := post(h.SetupPasskeyFinish, `{"username":"root","password":"nope12345","credential":{}}`); rec.Code != http.StatusUnauthorized || svc.passkeyAdded {
+		t.Fatalf("finish, wrong password: status %d", rec.Code)
+	}
+	rec = post(h.SetupPasskeyFinish, `{"username":"root","password":"secret123","name":"Key","credential":{"id":"x"}}`)
+	if rec.Code != http.StatusOK || !svc.passkeyAdded {
+		t.Fatalf("finish: status %d body %s", rec.Code, rec.Body)
+	}
+}
+
+func TestMFASetupPasskey_RefusedWhenPolicyDoesNotRequireIt(t *testing.T) {
+	h, svc := newMFAHandler(t)
+	svc.notRequired = true
+
+	for name, fn := range map[string]http.HandlerFunc{"begin": h.SetupPasskeyBegin, "finish": h.SetupPasskeyFinish} {
+		rec := post(fn, `{"username":"root","password":"secret123","credential":{}}`)
+		if rec.Code != http.StatusForbidden {
+			t.Errorf("%s: status %d, want 403", name, rec.Code)
+		}
+	}
+	if svc.passkeyBegun || svc.passkeyAdded {
+		t.Error("a password alone must not add a passkey to an account that is already protected or need not be")
 	}
 }
