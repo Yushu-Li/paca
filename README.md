@@ -151,6 +151,18 @@ Plan  →  Act  →  Check  →  Adapt
 
 ---
 
+## What's New in v0.20.0
+
+- **Git integration — agents that work on your pull requests** — connect a Git host and let AI agents work where your code lives. Mention an agent on a pull/merge request or issue, or hand it work, and it replies, pushes commits, reviews, and fixes CI, with every action attributed to a bot identity and bounded by least-privilege credentials. GitHub ships first, and the provider SPI lets a plugin add GitLab, Bitbucket, Gitea or Azure DevOps without touching the core.
+  - **Connections and linked repositories** — add any number of connections per host (a GitHub App, a bot user, or an access token), owned by the workspace or by a single project, then link repositories through them. Paca receives change-request, branch, comment, review and check events for linked repositories and routes them to the project.
+  - **Task references** — change requests and branches are tied to the tasks they mention, so a task shows its code changes alongside its activity.
+  - **Agent identities** — give an agent its own bot name, avatar and handle, or let it act through the connection its repository was linked with.
+  - **Permissions** — Git actions are governed by the same [roles and policies](docs/guides/roles-and-policies.md) as everything else.
+  - **Learn more** — see [Git agent workflow](docs/ai-agent/git-agent-workflow.md) for the full design.
+- **Multi-factor authentication** — require two-step verification for the whole workspace, with account lockout and a login throttle after repeated failed attempts. Admins can also restrict sign-in to IP allow-lists and reset an account's MFA from **Settings → Security**.
+
+---
+
 ## What's New in v0.19.0
 
 - **Role-based authorization (IAM-style)** — access in Paca is now controlled by **roles**: named JSON policies that allow or deny *actions* on *resources*, the same model as AWS IAM. A role is the only thing that grants access, nothing is allowed by default, and an explicit **Deny** always wins. Edits take effect on the person's next request.
