@@ -1,11 +1,9 @@
-// spec: features/auth/mfa.feature
+// spec: features/auth/passkeys.feature
 // seed: tests/seed.spec.ts
 //
-// Passkeys as a second factor, driven through Chromium's virtual
-// authenticator (a CDP WebAuthn emulation), so no real hardware or prompt is
-// involved. Other browsers have no such emulation and are skipped. Every
-// scenario works on throwaway users; the instance login policy is only ever
-// pointed at a throwaway role and restored afterwards.
+// Passkeys as a second sign-in factor. Chromium's virtual authenticator
+// stands in for the user's device, so the real WebAuthn ceremonies run
+// against the real server. Every scenario works on throwaway users.
 
 import { expect, type Page, test } from "@playwright/test";
 import {
@@ -20,10 +18,10 @@ import {
 	RESTRICTED_PASSWORD,
 	signIn,
 } from "../helpers/e2e-api";
-import { putPolicy, restorePolicy } from "../helpers/mfa";
+import { putPolicy, rawLogin, restorePolicy } from "../helpers/mfa";
+import { addVirtualAuthenticator } from "../helpers/passkey";
 
 const PREFIX = "E2E_PASSKEY_";
-const ROLE_PREFIX = "E2E_PASSKEY_ROLE_";
 const RUN_ID = newRunId();
 let counter = 0;
 
@@ -32,181 +30,236 @@ function uniqueName(label: string): string {
 	return `${PREFIX}${label}_${RUN_ID}_${counter}`;
 }
 
-test.beforeEach(async ({ request, browserName }) => {
+test.beforeEach(async ({ request }) => {
+	await cleanupUsersByPrefix(request, PREFIX);
+});
+
+test.afterEach(async ({ request }) => {
+	await cleanupUsersByPrefix(request, PREFIX);
+});
+
+test.beforeEach(({ browserName }) => {
 	test.skip(
 		browserName !== "chromium",
 		"virtual authenticators are Chromium-only",
 	);
-	await cleanupUsersByPrefix(request, PREFIX);
-	await cleanupGlobalRolesByPrefix(request, ROLE_PREFIX);
 });
-
-test.afterEach(async ({ request, browserName }) => {
-	if (browserName !== "chromium") return;
-	await restorePolicy(request);
-	await cleanupUsersByPrefix(request, PREFIX);
-	await cleanupGlobalRolesByPrefix(request, ROLE_PREFIX);
-});
-
-/** Plugs a software authenticator that approves every prompt into the page. */
-async function addAuthenticator(page: Page) {
-	const cdp = await page.context().newCDPSession(page);
-	await cdp.send("WebAuthn.enable");
-	const { authenticatorId } = await cdp.send(
-		"WebAuthn.addVirtualAuthenticator",
-		{
-			options: {
-				protocol: "ctap2",
-				transport: "internal",
-				hasResidentKey: true,
-				hasUserVerification: true,
-				isUserVerified: true,
-				automaticPresenceSimulation: true,
-			},
-		},
-	);
-	return {
-		credentials: async () =>
-			(await cdp.send("WebAuthn.getCredentials", { authenticatorId }))
-				.credentials,
-	};
-}
 
 async function newUser(
 	request: Parameters<typeof authRequest>[0],
 	playwright: Parameters<typeof createUserWithPassword>[1],
 	label: string,
-	roles?: string[],
 ) {
 	const username = uniqueName(label);
 	await authRequest(request);
 	await createUserWithPassword(request, playwright, {
 		username,
 		fullName: username,
-		roles,
 	});
 	return username;
 }
 
-async function submitCredentials(page: Page, username: string) {
+async function openSecurity(page: Page) {
+	await page.goto(`${BASE_URL}/account/security`);
+	await expect(page.getByRole("heading", { name: "Security" })).toBeVisible();
+}
+
+async function addPasskey(page: Page, name: string) {
+	await page.getByRole("button", { name: "Add a passkey" }).click();
+	const dialog = page.getByRole("dialog");
+	await dialog.getByLabel("Name").fill(name);
+	await dialog.getByRole("button", { name: "Continue" }).click();
+	await expect(dialog).toBeHidden();
+	await expect(page.getByText(name, { exact: true })).toBeVisible();
+}
+
+/** Drops the session and enters the password on the sign-in page. */
+async function passwordStep(page: Page, username: string) {
+	await page.context().clearCookies();
 	await page.goto(`${BASE_URL}/`);
 	await page.getByRole("textbox", { name: "Username" }).fill(username);
 	await page
 		.getByRole("textbox", { name: "Password" })
 		.fill(RESTRICTED_PASSWORD);
 	await page.getByRole("button", { name: "Sign in" }).click();
+	await expect(page).toHaveURL(/\/login\/mfa/);
 }
 
-const greeting = (page: Page) =>
-	page.getByRole("heading", { name: /Good (morning|afternoon|evening)/i });
-
-test.describe("Passkeys", () => {
-	test("a user adds a passkey, signs in with it, and removes it", async ({
+test.describe("Registering and signing in", () => {
+	test("a user registers a passkey and signs in with it", async ({
 		page,
 		request,
 		playwright,
 	}) => {
-		const username = await newUser(request, playwright, "ADD");
-		const authenticator = await addAuthenticator(page);
+		const username = await newUser(request, playwright, "UI");
+		await addVirtualAuthenticator(page);
 		await signIn(page, username, RESTRICTED_PASSWORD);
-		await page.goto(`${BASE_URL}/account/security`);
-		await expect(page.getByRole("heading", { name: "Security" })).toBeVisible();
+		await openSecurity(page);
 
-		await expect(
-			page.getByText("You haven't added a passkey yet."),
-		).toBeVisible();
-		await page.getByRole("button", { name: "Add a passkey" }).click();
-		const dialog = page.getByRole("dialog");
-		await dialog.getByLabel("Name").fill("Work laptop");
-		await dialog.getByRole("button", { name: "Continue" }).click();
-		await expect(page.getByText("Work laptop")).toBeVisible();
-		await expect(page.getByText("Never used")).toBeVisible();
-		expect(await authenticator.credentials()).toHaveLength(1);
+		await addPasskey(page, "Work laptop");
+		await expect(page.getByText(/never used/i)).toBeVisible();
 
-		// Sign out, then back in: password, then the passkey prompt.
-		await page.context().clearCookies();
-		await submitCredentials(page, username);
-		await expect(page).toHaveURL(/\/login\/mfa/);
+		await passwordStep(page, username);
 		await expect(
-			page.getByRole("heading", { name: "Use your passkey" }),
+			page.getByRole("button", { name: "Use a passkey" }),
 		).toBeVisible();
 		await page.getByRole("button", { name: "Use a passkey" }).click();
-		await expect(greeting(page)).toBeVisible();
-
-		// The sign-in is recorded, and removing needs the passkey again.
-		await page.goto(`${BASE_URL}/account/security`);
-		await expect(page.getByText(/Last used/)).toBeVisible();
-		await page.getByRole("button", { name: "Remove Work laptop" }).click();
-		await page
-			.getByRole("dialog")
-			.getByRole("button", { name: "Remove", exact: true })
-			.click();
 		await expect(
-			page.getByText("You haven't added a passkey yet."),
+			page.getByRole("heading", { name: /Good (morning|afternoon|evening)/i }),
+		).toBeVisible();
+
+		await openSecurity(page);
+		await expect(page.getByText(/last used/i)).toBeVisible();
+	});
+
+	test("a passkey-only account is challenged for a passkey, not a code", async ({
+		page,
+		request,
+		playwright,
+	}) => {
+		const username = await newUser(request, playwright, "ONLY");
+		await addVirtualAuthenticator(page);
+		await signIn(page, username, RESTRICTED_PASSWORD);
+		await openSecurity(page);
+		await addPasskey(page, "Phone");
+
+		const { response } = await rawLogin(playwright, username);
+		expect(response.ok()).toBeTruthy();
+		const body = (await response.json()).data;
+		expect(body.mfa_required).toBe(true);
+		expect(body.mfa_methods).toEqual(["passkey"]);
+
+		await passwordStep(page, username);
+		await expect(page.getByLabel("Authentication code")).toHaveCount(0);
+		await expect(
+			page.getByRole("button", { name: "Use a passkey" }),
 		).toBeVisible();
 	});
 
-	test("a protected user sets up a passkey on the sign-in page", async ({
+	test("an authenticator that lost its credential cannot finish sign-in", async ({
 		page,
 		request,
 		playwright,
 	}) => {
-		const roleName = `${ROLE_PREFIX}${RUN_ID}`;
+		const username = await newUser(request, playwright, "LOST");
+		const authenticator = await addVirtualAuthenticator(page);
+		await signIn(page, username, RESTRICTED_PASSWORD);
+		await openSecurity(page);
+		await addPasskey(page, "Old phone");
+
+		await passwordStep(page, username);
+		await authenticator.clearCredentials();
+		await page.getByRole("button", { name: "Use a passkey" }).click();
+
+		await expect(page.getByRole("alert")).toContainText(
+			/cancelled or timed out/i,
+		);
+		await expect(page).toHaveURL(/\/login\/mfa/);
+		await expect(
+			page.getByRole("button", { name: "Back to sign in" }),
+		).toBeVisible();
+	});
+});
+
+test.describe("Removing a passkey", () => {
+	test("removal is confirmed with a passkey, not the password", async ({
+		page,
+		request,
+		playwright,
+	}) => {
+		const username = await newUser(request, playwright, "REMOVE");
+		const authenticator = await addVirtualAuthenticator(page);
+		await signIn(page, username, RESTRICTED_PASSWORD);
+		await openSecurity(page);
+		await addPasskey(page, "Tablet");
+
+		await page.getByRole("button", { name: "Remove Tablet" }).click();
+		const dialog = page.getByRole("dialog");
+		await expect(dialog.getByLabel("Password")).toHaveCount(0);
+
+		// With the authenticator gone nothing can approve the removal.
+		await authenticator.clearCredentials();
+		await dialog.getByRole("button", { name: "Remove", exact: true }).click();
+		await expect(dialog.getByRole("alert")).toBeVisible();
+		await expect(page.getByText("Tablet", { exact: true })).toBeVisible();
+	});
+
+	test("a passkey the device holds removes itself", async ({
+		page,
+		request,
+		playwright,
+	}) => {
+		const username = await newUser(request, playwright, "REMOVE_OK");
+		await addVirtualAuthenticator(page);
+		await signIn(page, username, RESTRICTED_PASSWORD);
+		await openSecurity(page);
+		await addPasskey(page, "Laptop");
+
+		await page.getByRole("button", { name: "Remove Laptop" }).click();
+		const dialog = page.getByRole("dialog");
+		await dialog.getByRole("button", { name: "Remove", exact: true }).click();
+		await expect(dialog).toBeHidden();
+		await expect(
+			page.getByText("You haven't added a passkey yet."),
+		).toBeVisible();
+
+		const { response } = await rawLogin(playwright, username);
+		expect((await response.json()).data.mfa_required).toBeUndefined();
+	});
+});
+
+test.describe("When policy requires two-step verification", () => {
+	test("a protected user sets up a passkey on the sign-in page instead of an app", async ({
+		page,
+		request,
+		playwright,
+	}) => {
+		const role = `E2E_PASSKEY_ROLE_${RUN_ID}`;
 		await authRequest(request);
-		await createGlobalRole(request, roleName, allowPolicy([]));
-		const username = await newUser(request, playwright, "FORCED", [roleName]);
+		await createGlobalRole(request, role, allowPolicy([]));
+		const username = uniqueName("POLICY");
+		await createUserWithPassword(request, playwright, {
+			username,
+			fullName: username,
+			roles: [role],
+		});
 		const saved = await putPolicy(request, {
-			privileged_roles: [roleName],
+			privileged_roles: [role],
 			require_mfa: true,
 			ip_allow_list: [],
 		});
 		expect(saved.ok()).toBeTruthy();
-		const authenticator = await addAuthenticator(page);
+		await addVirtualAuthenticator(page);
 
-		await submitCredentials(page, username);
-		await expect(
-			page.getByRole("heading", { name: "Secure your account" }),
-		).toBeVisible({ timeout: 15_000 });
-		await page.getByRole("radio", { name: /Passkey/ }).check({ force: true });
-		await page.getByRole("button", { name: "Continue", exact: true }).click();
-		await expect(
-			page.getByRole("heading", { name: "Passkey added" }),
-		).toBeVisible();
-		expect(await authenticator.credentials()).toHaveLength(1);
-		await page.getByRole("button", { name: "Continue to sign in" }).click();
+		try {
+			await page.goto(`${BASE_URL}/`);
+			await page.getByRole("textbox", { name: "Username" }).fill(username);
+			await page
+				.getByRole("textbox", { name: "Password" })
+				.fill(RESTRICTED_PASSWORD);
+			await page.getByRole("button", { name: "Sign in" }).click();
 
-		await expect(page).toHaveURL(/\/login\/mfa/);
-		await page.getByRole("button", { name: "Use a passkey" }).click();
-		await expect(greeting(page)).toBeVisible();
-	});
+			await expect(
+				page.getByRole("heading", { name: "Secure your account" }),
+			).toBeVisible();
+			// The passkey is recommended, so it is already selected.
+			await expect(page.getByRole("radio", { name: /Passkey/ })).toBeChecked();
+			await page.getByRole("button", { name: "Continue", exact: true }).click();
+			await expect(
+				page.getByRole("heading", { name: "Passkey added" }),
+			).toBeVisible();
+			await page.getByRole("button", { name: "Continue to sign in" }).click();
 
-	test("a passkey from another device is refused", async ({
-		page,
-		request,
-		playwright,
-	}) => {
-		const username = await newUser(request, playwright, "OTHER");
-		await addAuthenticator(page);
-		await signIn(page, username, RESTRICTED_PASSWORD);
-		await page.goto(`${BASE_URL}/account/security`);
-		await page.getByRole("button", { name: "Add a passkey" }).click();
-		await page
-			.getByRole("dialog")
-			.getByRole("button", { name: "Continue" })
-			.click();
-		await expect(page.getByText("Passkey", { exact: true })).toBeVisible();
-
-		// A fresh browser profile has an authenticator that holds no credential.
-		const stranger = await page.context().browser()?.newContext();
-		if (!stranger) throw new Error("no browser");
-		const strangerPage = await stranger.newPage();
-		await addAuthenticator(strangerPage);
-		await submitCredentials(strangerPage, username);
-		await strangerPage.getByRole("button", { name: "Use a passkey" }).click();
-		await expect(
-			strangerPage.getByText(/couldn't be verified|cancelled or timed out/),
-		).toBeVisible();
-		await expect(strangerPage).toHaveURL(/\/login\/mfa/);
-		await stranger.close();
+			await expect(page).toHaveURL(/\/login\/mfa/);
+			await page.getByRole("button", { name: "Use a passkey" }).click();
+			await expect(
+				page.getByRole("heading", {
+					name: /Good (morning|afternoon|evening)/i,
+				}),
+			).toBeVisible();
+		} finally {
+			await restorePolicy(request);
+			await cleanupGlobalRolesByPrefix(request, "E2E_PASSKEY_ROLE_");
+		}
 	});
 });
