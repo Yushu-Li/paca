@@ -145,7 +145,12 @@ class ExternalValkeyTests(unittest.TestCase):
                 timeout=30,
             ).stdout
         )["services"]
-        actual = url if external else "redis://valkey:6379/0"
+        password = next(
+            line.split("=", 1)[1]
+            for line in (self.install_dir / ".env").read_text().splitlines()
+            if line.startswith("VALKEY_PASSWORD=")
+        )
+        actual = url if external else f"redis://:{password}@valkey:6379/0"
         for service, key in (
             ("api", "REDIS_URL"),
             ("realtime", "REDIS_URL"),

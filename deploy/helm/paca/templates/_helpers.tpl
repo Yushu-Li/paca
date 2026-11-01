@@ -82,7 +82,7 @@ hand-rolling its own copy that could drift.
 {{- if not .Values.valkey.enabled -}}
 {{- required "externalRedisUrl is required when valkey.enabled is false" .Values.externalRedisUrl -}}
 {{- else -}}
-{{- printf "redis://%s-valkey:6379/0" (include "paca.fullname" .) -}}
+{{- printf "redis://:%s@%s-valkey:6379/0" (required "secrets.valkeyPassword is required when valkey.enabled" .Values.secrets.valkeyPassword | urlquery) (include "paca.fullname" .) -}}
 {{- end -}}
 {{- end -}}
 

@@ -59,6 +59,7 @@ Generate strong values yourself, e.g. `openssl rand -hex 32`.
 | `secrets.encryptionKey` | 64-char hex string encrypting plugin secrets and (when `agentRunner.enabled`) LLM API keys at rest | `""` |
 | `secrets.internalApiKey` | Pre-shared key authenticating `api` <-> `agent-runner`'s internal routes (only required when `agentRunner.enabled`) | `""` |
 | `secrets.postgresPassword` | PostgreSQL password | `""` |
+| `secrets.valkeyPassword` | Bundled Valkey password (required when `valkey.enabled`; with `existingSecret` use the `VALKEY_PASSWORD` key and a password-bearing `REDIS_URL`) | `""` |
 | `secrets.storageAccessKeyId` | External S3 access key ID — only used when `rustfs.enabled: false`; the bundled RustFS uses `rustfs.secret.rustfs.access_key` instead | `""` |
 | `secrets.storageSecretAccessKey` | External S3 secret access key — same condition as above | `""` |
 
