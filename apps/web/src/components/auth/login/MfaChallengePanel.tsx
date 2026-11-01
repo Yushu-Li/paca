@@ -122,7 +122,11 @@ export function MfaChallengePanel({ pending }: { pending: PendingMfa }) {
 				<ShieldCheck className="size-5 text-primary" />
 			</div>
 			<h1 className="display-title mb-1 text-2xl font-bold text-(--sea-ink) sm:text-3xl">
-				{t("login.mfa.title")}
+				{hasCode && hasPasskey
+					? t("login.mfa.titleBoth")
+					: hasCode
+						? t("login.mfa.title")
+						: t("login.mfa.titlePasskey")}
 			</h1>
 			<p className="mb-8 text-sm text-(--sea-ink-soft)">
 				{hasCode && hasPasskey
