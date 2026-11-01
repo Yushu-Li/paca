@@ -149,10 +149,15 @@ func (k *softKey) register(t *testing.T, options json.RawMessage) []byte {
 	if err := json.Unmarshal(options, &o); err != nil {
 		t.Fatal(err)
 	}
+	// Bytes is the uncompressed point: 0x04, then X and Y as 32 bytes each.
+	point, err := k.priv.PublicKey.Bytes()
+	if err != nil {
+		t.Fatal(err)
+	}
 	cose, err := cbor.Marshal(map[int]any{
 		1: 2, 3: -7, -1: 1,
-		-2: k.priv.PublicKey.X.FillBytes(make([]byte, 32)),
-		-3: k.priv.PublicKey.Y.FillBytes(make([]byte, 32)),
+		-2: point[1:33],
+		-3: point[33:65],
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -448,5 +453,89 @@ func TestResetRemovesPasskeys(t *testing.T) {
 	}
 	if err := svc.Reset(ctx, u.ID); err != nil || len(pk.list) != 0 {
 		t.Fatalf("reset: %v (%d left)", err, len(pk.list))
+	}
+}
+
+func TestPasskeyOptionsAskForUserVerification(t *testing.T) {
+	svc, _, _ := newPasskeySvc(t)
+	ctx := context.Background()
+	u := admin()
+	key := newSoftKey(t)
+
+	creation, _ := svc.BeginPasskeyRegistration(ctx, u)
+	var c struct {
+		PublicKey struct {
+			AuthenticatorSelection struct {
+				UserVerification string `json:"userVerification"`
+			} `json:"authenticatorSelection"`
+		} `json:"publicKey"`
+	}
+	if err := json.Unmarshal(creation, &c); err != nil || c.PublicKey.AuthenticatorSelection.UserVerification != "preferred" {
+		t.Fatalf("registration options: %s (%v)", creation, err)
+	}
+	if _, err := svc.FinishPasskeyRegistration(ctx, u, "k", key.register(t, creation)); err != nil {
+		t.Fatal(err)
+	}
+	request, err := svc.BeginPasskeyLogin(ctx, u, "chal")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var r struct {
+		PublicKey struct {
+			UserVerification string `json:"userVerification"`
+		} `json:"publicKey"`
+	}
+	if err := json.Unmarshal(request, &r); err != nil || r.PublicKey.UserVerification != "preferred" {
+		t.Fatalf("login options: %s (%v)", request, err)
+	}
+}
+
+// A deployment that loses PUBLIC_URL must not quietly drop the second factor
+// of an account whose only factor is a passkey.
+func TestPasskeyAccountFailsClosedWhenRelyingPartyIsGone(t *testing.T) {
+	svc, st, pk := newPasskeySvc(t)
+	ctx := context.Background()
+	u := admin()
+	key := newSoftKey(t)
+	opts, _ := svc.BeginPasskeyRegistration(ctx, u)
+	if _, err := svc.FinishPasskeyRegistration(ctx, u, "k", key.register(t, opts)); err != nil {
+		t.Fatal(err)
+	}
+
+	// Same database, restarted without PUBLIC_URL.
+	down, _, _ := newSvc(t)
+	down.store = st
+	down.WithPasskeyStore(pk)
+	if down.PasskeysAvailable() {
+		t.Fatal("passkeys should be off")
+	}
+	if err := down.CheckLogin(ctx, u, "", "1.1.1.1"); !errors.Is(err, mfadom.ErrRequired) {
+		t.Fatalf("password alone must not suffice: got %v", err)
+	}
+	if err := down.CheckLogin(ctx, u, "123456", "1.1.1.1"); !errors.Is(err, mfadom.ErrRequired) {
+		t.Fatalf("a code must not stand in for the passkey: got %v", err)
+	}
+	// It does not advertise a method it cannot answer, nor start one.
+	if m, _ := down.Methods(ctx, u); len(m) != 0 {
+		t.Fatalf("methods = %v", m)
+	}
+	if _, err := down.BeginPasskeyLogin(ctx, u, "c"); !errors.Is(err, mfadom.ErrPasskeyUnavailable) {
+		t.Fatalf("begin login: got %v", err)
+	}
+	if _, err := down.BeginPasskeyVerification(ctx, u); !errors.Is(err, mfadom.ErrPasskeyUnavailable) {
+		t.Fatalf("begin verification: got %v", err)
+	}
+	// Policy does not offer password-only TOTP setup to someone who has a factor.
+	st.policy = mfadom.Policy{PrivilegedRoles: []string{mfadom.AllRoles}, RequireMFA: true}
+	if need, _ := down.SetupRequired(ctx, u); need {
+		t.Fatal("setup must stay closed for an account that has a passkey")
+	}
+	// An admin reset is the way back in.
+	if err := down.Reset(ctx, u.ID); err != nil {
+		t.Fatal(err)
+	}
+	st.policy = mfadom.Policy{}
+	if err := down.CheckLogin(ctx, u, "", "1.1.1.1"); err != nil {
+		t.Fatalf("after reset: %v", err)
 	}
 }

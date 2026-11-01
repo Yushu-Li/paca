@@ -254,12 +254,16 @@ func New(cfg *config.Config) (*App, error) {
 	mfaService := mfasvc.New(pgRepo.NewMFARepository(db), encryptor, "Paca")
 	// Passkeys need a relying-party identity, taken from PUBLIC_URL; without
 	// one they stay off and accounts keep using TOTP.
+	// The store is installed either way, so accounts that already registered a
+	// passkey keep owing a second factor if the relying party goes missing.
+	passkeyRepo := pgRepo.NewPasskeyRepository(db)
+	mfaService.WithPasskeyStore(passkeyRepo)
 	if rp, ok := mfasvc.RelyingPartyFromURL(cfg.Server.PublicURL, cfg.Server.PasskeyRPID, "Paca"); ok {
-		if _, err := mfaService.WithPasskeys(pgRepo.NewPasskeyRepository(db), redisRepo.NewCeremonyStore(redisClient), rp); err != nil {
-			log.Warn("passkeys disabled: invalid relying-party config", "error", err)
+		if _, err := mfaService.WithPasskeys(passkeyRepo, redisRepo.NewCeremonyStore(redisClient), rp); err != nil {
+			log.Warn("passkeys disabled: invalid relying-party config; accounts with a passkey cannot sign in until it is fixed", "error", err)
 		}
 	} else {
-		log.Warn("PUBLIC_URL not set or invalid: passkeys are disabled")
+		log.Warn("PUBLIC_URL not set or invalid: passkeys are disabled; accounts with a passkey cannot sign in until it is set (or an admin resets their MFA)")
 	}
 	authService.WithLoginGate(mfaService)
 	// Wrong-password lockout per username: 10 failures within 15 minutes lock

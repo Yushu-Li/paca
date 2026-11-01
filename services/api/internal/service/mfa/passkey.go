@@ -58,13 +58,28 @@ func RelyingPartyFromURL(publicURL, rpID, name string) (RelyingParty, bool) {
 	return RelyingParty{ID: rpID, Name: name, Origins: []string{u.Scheme + "://" + u.Host}}, true
 }
 
+// WithPasskeyStore tells the service where passkeys are stored without
+// enabling WebAuthn. Install it even when no relying party is configured: an
+// account that registered a passkey keeps owing a second factor then, rather
+// than silently falling back to its password alone, so a lost PUBLIC_URL
+// can't downgrade it.
+func (s *Service) WithPasskeyStore(store mfadom.PasskeyStore) *Service {
+	s.passkeys = store
+	return s
+}
+
 // WithPasskeys enables WebAuthn passkeys as a second factor. Without it the
-// passkey methods return ErrPasskeyUnavailable and accounts can only use TOTP.
+// passkey methods return ErrPasskeyUnavailable.
 func (s *Service) WithPasskeys(store mfadom.PasskeyStore, ceremonies mfadom.CeremonyStore, rp RelyingParty) (*Service, error) {
 	wa, err := webauthn.New(&webauthn.Config{
 		RPID:          rp.ID,
 		RPDisplayName: rp.Name,
 		RPOrigins:     rp.Origins,
+		// Ask authenticators to verify the user (fingerprint, face, PIN) when
+		// they can, without refusing security keys that can't.
+		AuthenticatorSelection: protocol.AuthenticatorSelection{
+			UserVerification: protocol.VerificationPreferred,
+		},
 	})
 	if err != nil {
 		return nil, fmt.Errorf("mfa: webauthn config: %w", err)
@@ -95,12 +110,13 @@ func (s *Service) loadUser(ctx context.Context, u *userdom.User) (waUser, []mfad
 	return waUser{u: u, creds: creds}, list, nil
 }
 
-// hasPasskeys reports whether u has a registered passkey. With passkeys
-// unconfigured it is false, so a deployment that drops PUBLIC_URL falls back
-// to TOTP-only rather than locking passkey-only accounts out of the check
-// (policy then demands enrollment of a method that works).
+// hasPasskeys reports whether u has a registered passkey, whether or not
+// WebAuthn is currently enabled. A deployment that loses its relying party
+// (PUBLIC_URL unset) therefore fails closed for such an account: it still owes
+// a second factor it cannot produce, and signs in only once passkeys are
+// configured again, through TOTP if it has one, or after an admin MFA reset.
 func (s *Service) hasPasskeys(ctx context.Context, userID uuid.UUID) (bool, error) {
-	if s.wa == nil {
+	if s.passkeys == nil {
 		return false, nil
 	}
 	list, err := s.passkeys.ListPasskeys(ctx, userID)
@@ -117,12 +133,15 @@ func (s *Service) Methods(ctx context.Context, u *userdom.User) ([]string, error
 	if enr != nil && enr.Enabled {
 		out = append(out, mfadom.MethodTOTP)
 	}
-	has, err := s.hasPasskeys(ctx, u.ID)
-	if err != nil {
-		return nil, err
-	}
-	if has {
-		out = append(out, mfadom.MethodPasskey)
+	// Only advertised when it can be answered; see hasPasskeys.
+	if s.wa != nil {
+		has, err := s.hasPasskeys(ctx, u.ID)
+		if err != nil {
+			return nil, err
+		}
+		if has {
+			out = append(out, mfadom.MethodPasskey)
+		}
 	}
 	return out, nil
 }
@@ -205,6 +224,9 @@ func (s *Service) FinishPasskeyRegistration(ctx context.Context, u *userdom.User
 // BeginPasskeyVerification returns the WebAuthn request options for proving,
 // from a signed-in session, that the user holds one of their passkeys.
 func (s *Service) BeginPasskeyVerification(ctx context.Context, u *userdom.User) (json.RawMessage, error) {
+	if s.wa == nil {
+		return nil, mfadom.ErrPasskeyUnavailable
+	}
 	// Signed in already, so "no passkey" is a 404-style answer, not the 401
 	// a login gives (which would trigger a token refresh).
 	if has, err := s.hasPasskeys(ctx, u.ID); err != nil {

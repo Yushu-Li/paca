@@ -156,4 +156,30 @@ describe("PasskeysCard", () => {
 		expect(await screen.findByText(/cancelled or timed out/i)).toBeVisible();
 		expect(http.delete).not.toHaveBeenCalled();
 	});
+
+	it("starts each add dialog clean after an earlier failure", async () => {
+		serve(true, []);
+		webauthn.startRegistration.mockRejectedValue(
+			Object.assign(new Error("x"), { name: "NotAllowedError" }),
+		);
+		http.post.mockResolvedValue({
+			data: { data: { options: { publicKey: {} } } },
+		});
+		const user = userEvent.setup();
+		renderWithQueries(<PasskeysCard />);
+
+		await user.click(
+			await screen.findByRole("button", { name: /add a passkey/i }),
+		);
+		await user.type(screen.getByLabelText(/^name$/i), "Phone");
+		await user.click(screen.getByRole("button", { name: /continue/i }));
+		expect(await screen.findByText(/cancelled or timed out/i)).toBeVisible();
+
+		await user.click(screen.getByRole("button", { name: /cancel/i }));
+		await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+		await user.click(screen.getByRole("button", { name: /add a passkey/i }));
+
+		expect(screen.getByLabelText(/^name$/i)).toHaveValue("");
+		expect(screen.queryByText(/cancelled or timed out/i)).toBeNull();
+	});
 });

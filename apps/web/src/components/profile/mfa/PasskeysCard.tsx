@@ -1,7 +1,7 @@
 import { browserSupportsWebAuthn } from "@simplewebauthn/browser";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { KeyRound, Loader2, Trash2 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { InlineNotice } from "@/components/shared/inline-notice";
@@ -176,17 +176,19 @@ function AddPasskeyDialog({
 		},
 	});
 
-	function reset(next: boolean) {
-		if (next) {
+	// The dialog is opened by a button outside it, so Radix never reports the
+	// opening: clear the last attempt here, each time it opens.
+	// biome-ignore lint/correctness/useExhaustiveDependencies: reset only when it opens
+	useEffect(() => {
+		if (open) {
 			setName("");
 			setError(null);
 			mutation.reset();
 		}
-		onOpenChange(next);
-	}
+	}, [open]);
 
 	return (
-		<Dialog open={open} onOpenChange={reset}>
+		<Dialog open={open} onOpenChange={onOpenChange}>
 			<DialogContent className="max-w-sm">
 				<DialogHeader>
 					<DialogTitle>{t("security.passkeys.addTitle")}</DialogTitle>
