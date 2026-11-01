@@ -68,6 +68,8 @@
 #     REDIS_URL                    Setting this selects external Redis/Valkey
 #                                  and suppresses the bundled Valkey container.
 #                                  Unset/empty uses bundled Valkey.
+#     VALKEY_PASSWORD              URL-safe password of the bundled Valkey
+#                                  (default: auto-generated)
 #
 #   Database backups (bundled Postgres only; skipped for external DB)
 #     BACKUP_ENABLED               true/false                          (default: true)
@@ -763,9 +765,12 @@ yes_no INCLUDE_AGENT_RUNNER "Include the Agent Runner service?" "${PACA_AGENT_RU
 
 SCALE_AGENT_RUNNER=""
 INTERNAL_API_KEY="${INTERNAL_API_KEY:-$(rand_hex 32)}"
-# Bundled Valkey's requirepass. Always generated (also when external Valkey is
-# used) because the compose file requires the variable to be set.
-VALKEY_PASSWORD="$(rand_hex 32)"
+# Bundled Valkey's requirepass. Always set (also when external Valkey is used)
+# because the compose file requires the variable. It is embedded in the default
+# REDIS_URL, so a preset value must be URL-safe.
+VALKEY_PASSWORD="${VALKEY_PASSWORD:-$(rand_hex 32)}"
+[[ "$VALKEY_PASSWORD" =~ ^[A-Za-z0-9._~-]+$ ]] \
+    || die "VALKEY_PASSWORD must be non-empty and URL-safe (letters, digits, . _ ~ -)."
 
 if [[ "$INCLUDE_AGENT_RUNNER" == "no" ]]; then
     SCALE_AGENT_RUNNER="--scale agent-runner=0"

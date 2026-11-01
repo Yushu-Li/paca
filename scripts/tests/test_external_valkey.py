@@ -265,6 +265,58 @@ class ExternalValkeyTests(unittest.TestCase):
                 self.run_script("upgrade.sh")
                 self.assert_config("", external=False)
 
+    def env_value(self, name):
+        for line in (self.install_dir / ".env").read_text().splitlines():
+            if line.startswith(f"{name}="):
+                return line.split("=", 1)[1]
+        return None
+
+    def test_install_honors_a_preset_valkey_password(self):
+        self.run_script("install.sh", VALKEY_PASSWORD="preset-pass_1.2~3")
+        self.assertEqual(self.env_value("VALKEY_PASSWORD"), "preset-pass_1.2~3")
+
+    def test_install_rejects_a_url_unsafe_valkey_password(self):
+        result = subprocess.run(
+            ["bash", str(ROOT / "scripts/install.sh")],
+            env={**self.env, "VALKEY_PASSWORD": "bad@pass/word"},
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse((self.install_dir / ".env").exists())
+
+    def test_install_adds_a_password_to_a_kept_env_without_one(self):
+        self.run_script("install.sh")
+        env_file = self.install_dir / ".env"
+        env_file.write_text(
+            "".join(
+                line
+                for line in env_file.read_text().splitlines(keepends=True)
+                if not line.startswith("VALKEY_PASSWORD=")
+            )
+        )
+        self.run_script("install.sh")
+        self.assertRegex(self.env_value("VALKEY_PASSWORD"), r"^[a-f0-9]{32}$")
+        self.assert_config("", external=False)
+
+    def test_upgrade_backfills_a_missing_valkey_password_once(self):
+        self.run_script("install.sh")
+        env_file = self.install_dir / ".env"
+        env_file.write_text(
+            "".join(
+                line
+                for line in env_file.read_text().splitlines(keepends=True)
+                if not line.startswith("VALKEY_PASSWORD=")
+            )
+        )
+        self.run_script("upgrade.sh")
+        password = self.env_value("VALKEY_PASSWORD")
+        self.assertRegex(password, r"^[a-f0-9]{32}$")
+        self.assert_config("", external=False)
+        self.run_script("upgrade.sh")
+        self.assertEqual(self.env_value("VALKEY_PASSWORD"), password)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

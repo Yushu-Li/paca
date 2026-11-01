@@ -13,6 +13,10 @@ spec:
       {{- include "paca.selectorLabels" (dict "root" . "component" "agent-runner") | nindent 6 }}
   template:
     metadata:
+      {{- if not .Values.secrets.existingSecret }}
+      annotations:
+        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+      {{- end }}
       labels:
         {{- include "paca.componentLabels" (dict "root" . "component" "agent-runner") | nindent 8 }}
     spec:
