@@ -3,10 +3,12 @@ package postgres
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jmoiron/sqlx"
 
 	mfadom "github.com/Paca-AI/api/internal/domain/mfa"
@@ -63,20 +65,40 @@ func (r *PasskeyRepository) AddPasskey(ctx context.Context, p *mfadom.Passkey) e
 		INSERT INTO user_passkeys (id, user_id, credential_id, name, credential)
 		VALUES ($1, $2, $3, $4, $5::jsonb)`,
 		p.ID.String(), p.UserID.String(), p.CredentialID, p.Name, p.Credential)
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+		// credential_id is unique across accounts: the authenticator already
+		// holds this credential for another registration.
+		return mfadom.ErrPasskeyInvalid
+	}
 	if err != nil {
 		return fmt.Errorf("passkey repo: add: %w", err)
 	}
 	return nil
 }
 
-// UpdatePasskeyCredential stores the refreshed credential record.
+// UpdatePasskeyCredential stores the refreshed credential record. A record
+// whose sign counter is behind the stored one is dropped, so two concurrent
+// sign-ins can't move the counter backwards and trip the clone warning later.
 func (r *PasskeyRepository) UpdatePasskeyCredential(ctx context.Context, id uuid.UUID, credential []byte, usedAt time.Time) error {
 	if _, err := r.db.ExecContext(ctx, `
-		UPDATE user_passkeys SET credential = $2::jsonb, last_used_at = $3 WHERE id = $1`,
+		UPDATE user_passkeys SET credential = $2::jsonb, last_used_at = $3
+		WHERE id = $1
+		  AND COALESCE((credential->'authenticator'->>'signCount')::bigint, 0)
+		   <= COALESCE(($2::jsonb->'authenticator'->>'signCount')::bigint, 0)`,
 		id.String(), credential, usedAt); err != nil {
 		return fmt.Errorf("passkey repo: update: %w", err)
 	}
 	return nil
+}
+
+// HasPasskeys reports whether the user has at least one passkey.
+func (r *PasskeyRepository) HasPasskeys(ctx context.Context, userID uuid.UUID) (bool, error) {
+	var has bool
+	if err := r.db.GetContext(ctx, &has, `SELECT EXISTS (SELECT 1 FROM user_passkeys WHERE user_id = $1)`, userID.String()); err != nil {
+		return false, fmt.Errorf("passkey repo: exists: %w", err)
+	}
+	return has, nil
 }
 
 // DeletePasskey removes one of the user's passkeys.

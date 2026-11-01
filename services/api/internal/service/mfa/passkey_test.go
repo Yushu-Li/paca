@@ -40,6 +40,10 @@ func (m *memPasskeys) ListPasskeys(_ context.Context, id uuid.UUID) ([]mfadom.Pa
 	}
 	return out, nil
 }
+func (m *memPasskeys) HasPasskeys(ctx context.Context, id uuid.UUID) (bool, error) {
+	l, err := m.ListPasskeys(ctx, id)
+	return len(l) > 0, err
+}
 func (m *memPasskeys) AddPasskey(_ context.Context, p *mfadom.Passkey) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -537,5 +541,50 @@ func TestPasskeyAccountFailsClosedWhenRelyingPartyIsGone(t *testing.T) {
 	st.policy = mfadom.Policy{}
 	if err := down.CheckLogin(ctx, u, "", "1.1.1.1"); err != nil {
 		t.Fatalf("after reset: %v", err)
+	}
+}
+
+// Removing a passkey asks for user verification; signing in only prefers it.
+func TestPasskeyRemovalRequiresUserVerification(t *testing.T) {
+	svc, _, _ := newPasskeySvc(t)
+	ctx := context.Background()
+	u := admin()
+	key := newSoftKey(t)
+	creation, _ := svc.BeginPasskeyRegistration(ctx, u)
+	if _, err := svc.FinishPasskeyRegistration(ctx, u, "k", key.register(t, creation)); err != nil {
+		t.Fatal(err)
+	}
+	request, err := svc.BeginPasskeyVerification(ctx, u)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var r struct {
+		PublicKey struct {
+			UserVerification string `json:"userVerification"`
+		} `json:"publicKey"`
+	}
+	if err := json.Unmarshal(request, &r); err != nil || r.PublicKey.UserVerification != "required" {
+		t.Fatalf("verification options: %s (%v)", request, err)
+	}
+}
+
+// One unreadable credential record must not break the others.
+func TestUnreadablePasskeyIsSkipped(t *testing.T) {
+	svc, _, pk := newPasskeySvc(t)
+	ctx := context.Background()
+	u := admin()
+	key := newSoftKey(t)
+	creation, _ := svc.BeginPasskeyRegistration(ctx, u)
+	if _, err := svc.FinishPasskeyRegistration(ctx, u, "k", key.register(t, creation)); err != nil {
+		t.Fatal(err)
+	}
+	pk.list = append(pk.list, mfadom.Passkey{ID: uuid.New(), UserID: u.ID, Credential: []byte("{not json")})
+
+	request, err := svc.BeginPasskeyLogin(ctx, u, "chal")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.VerifyPasskeyLogin(ctx, u, "chal", key.assert(t, request), "127.0.0.1"); err != nil {
+		t.Fatalf("login with a corrupt sibling record: %v", err)
 	}
 }

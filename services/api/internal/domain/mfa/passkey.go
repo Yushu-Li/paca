@@ -46,9 +46,12 @@ type Passkey struct {
 // PasskeyStore is the persistence contract for passkeys.
 type PasskeyStore interface {
 	ListPasskeys(ctx context.Context, userID uuid.UUID) ([]Passkey, error)
+	// HasPasskeys reports whether the user has any passkey, without loading them.
+	HasPasskeys(ctx context.Context, userID uuid.UUID) (bool, error)
 	AddPasskey(ctx context.Context, p *Passkey) error
 	// UpdatePasskeyCredential stores the credential record after a sign-in
-	// (new sign counter) and stamps last_used_at.
+	// (new sign counter) and stamps last_used_at. A record with a lower sign
+	// counter than the stored one is ignored.
 	UpdatePasskeyCredential(ctx context.Context, id uuid.UUID, credential []byte, usedAt time.Time) error
 	// DeletePasskey removes one of the user's passkeys, or ErrPasskeyNotFound.
 	DeletePasskey(ctx context.Context, userID, id uuid.UUID) error

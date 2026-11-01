@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/url"
 	"strings"
 	"time"
@@ -103,7 +104,10 @@ func (s *Service) loadUser(ctx context.Context, u *userdom.User) (waUser, []mfad
 	for _, p := range list {
 		var c webauthn.Credential
 		if err := json.Unmarshal(p.Credential, &c); err != nil {
-			return waUser{}, nil, fmt.Errorf("mfa: decode passkey %s: %w", p.ID, err)
+			// One unreadable record must not take down every ceremony (and
+			// with it sign-in); the passkey just can't be used.
+			slog.Warn("mfa: skipping unreadable passkey", "passkey", p.ID, "error", err)
+			continue
 		}
 		creds = append(creds, c)
 	}
@@ -119,8 +123,7 @@ func (s *Service) hasPasskeys(ctx context.Context, userID uuid.UUID) (bool, erro
 	if s.passkeys == nil {
 		return false, nil
 	}
-	list, err := s.passkeys.ListPasskeys(ctx, userID)
-	return len(list) > 0, err
+	return s.passkeys.HasPasskeys(ctx, userID)
 }
 
 // Methods lists the second factors u can answer a login challenge with.
@@ -234,7 +237,8 @@ func (s *Service) BeginPasskeyVerification(ctx context.Context, u *userdom.User)
 	} else if !has {
 		return nil, mfadom.ErrPasskeyNotFound
 	}
-	return s.beginAssertion(ctx, u, "verify:"+u.ID.String())
+	// Removing a second factor needs more than a tap on a stolen, unlocked key.
+	return s.beginAssertion(ctx, u, "verify:"+u.ID.String(), webauthn.WithUserVerification(protocol.VerificationRequired))
 }
 
 // DeletePasskey removes one of u's passkeys, on the strength of an assertion
@@ -271,7 +275,7 @@ func (s *Service) VerifyPasskeyLogin(ctx context.Context, u *userdom.User, cerem
 
 // beginAssertion parks a fresh challenge under key and returns the request
 // options for u's passkeys.
-func (s *Service) beginAssertion(ctx context.Context, u *userdom.User, key string) (json.RawMessage, error) {
+func (s *Service) beginAssertion(ctx context.Context, u *userdom.User, key string, opts ...webauthn.LoginOption) (json.RawMessage, error) {
 	wu, _, err := s.loadUser(ctx, u)
 	if err != nil {
 		return nil, err
@@ -279,7 +283,7 @@ func (s *Service) beginAssertion(ctx context.Context, u *userdom.User, key strin
 	if len(wu.creds) == 0 {
 		return nil, mfadom.ErrInvalidCode
 	}
-	assertion, session, err := s.wa.BeginLogin(wu)
+	assertion, session, err := s.wa.BeginLogin(wu, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("mfa: begin passkey assertion: %w", err)
 	}
@@ -327,6 +331,9 @@ func (s *Service) verifyAssertion(ctx context.Context, u *userdom.User, key stri
 	return invalid
 }
 
+// putCeremony parks session under key. Keys are per account (or per login
+// challenge), not per ceremony: a second begin replaces the first, so two open
+// tabs race and the loser's finish is refused as PASSKEY_INVALID.
 func (s *Service) putCeremony(ctx context.Context, key string, session *webauthn.SessionData) error {
 	b, err := json.Marshal(session)
 	if err != nil {

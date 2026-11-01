@@ -279,7 +279,8 @@ docker compose --env-file .env up -d --scale valkey=0
 The connection must be reachable from the API, realtime, and agent-runner
 containers; `localhost` inside a container is not the Docker host. Use a
 Redis-compatible service that supports Paca's cache, pub/sub, and streams
-operations. Percent-encode reserved characters in credentials. The installer
+operations (`GETDEL`, so Redis 6.2+ or Valkey, is required for passkey
+ceremonies). Percent-encode reserved characters in credentials. The installer
 single-quotes the dotenv value to preserve literal `$` characters and does not
 print the connection URL. Keep that quoting when editing `.env` manually.
 
