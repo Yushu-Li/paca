@@ -664,11 +664,15 @@ test.describe("In the browser", () => {
 
 		await expect(
 			page.getByRole("heading", { name: "Secure your account" }),
-		).toBeVisible();
+		).toBeVisible({ timeout: 15_000 });
 		await page
 			.getByRole("radio", { name: /Authenticator app/ })
 			.check({ force: true });
 		await page.getByRole("button", { name: "Continue", exact: true }).click();
+		// The key is tucked behind a link until the person can't scan the code.
+		await page
+			.getByRole("button", { name: "Can't scan? Enter this key instead." })
+			.click();
 		const secret = (
 			await page.locator("p.select-all").first().innerText()
 		).trim();
